@@ -95,6 +95,15 @@ class ContentsWindow(QDialog):
         self.setFixedSize(800, 600)
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
         
+        # 设置窗口图标
+        import os
+        from PyQt5.QtGui import QIcon
+        # 优先使用PNG格式，因为Windows对PNG支持更好
+        if os.path.exists('logo.png'):
+            self.setWindowIcon(QIcon('logo.png'))
+        elif os.path.exists('logo.svg'):
+            self.setWindowIcon(QIcon('logo.svg'))
+        
         # 主布局
         layout = QVBoxLayout(self)
         layout.setSpacing(10)

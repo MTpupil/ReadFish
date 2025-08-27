@@ -56,7 +56,30 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle('ReadFish - 摸个鱼吧')
-        self.setFixedSize(600, 500)  # 增大窗口尺寸以容纳书架功能
+        self.setFixedSize(600, 720)  # 增大窗口尺寸以容纳书架功能和公众号信息
+        
+        # 设置应用程序图标
+        # 优先使用PNG格式，因为Windows对PNG支持更好
+        if os.path.exists('logo.png'):
+            # 创建图标并设置多个尺寸以确保在任务栏正确显示
+            icon = QIcon('logo.png')
+            # 添加不同尺寸的图标以提高兼容性
+            icon.addFile('logo.png', QSize(16, 16))
+            icon.addFile('logo.png', QSize(24, 24))
+            icon.addFile('logo.png', QSize(32, 32))
+            icon.addFile('logo.png', QSize(48, 48))
+            icon.addFile('logo.png', QSize(64, 64))
+            self.setWindowIcon(icon)
+        elif os.path.exists('logo.svg'):
+            # 备选：使用SVG格式的图标
+            icon = QIcon('logo.svg')
+            # 添加不同尺寸的图标以提高兼容性
+            icon.addFile('logo.svg', QSize(16, 16))
+            icon.addFile('logo.svg', QSize(24, 24))
+            icon.addFile('logo.svg', QSize(32, 32))
+            icon.addFile('logo.svg', QSize(48, 48))
+            icon.addFile('logo.svg', QSize(64, 64))
+            self.setWindowIcon(icon)
         
         # 设置窗口居中
         self.center_window()
@@ -104,9 +127,13 @@ class MainWindow(QMainWindow):
         self.bookshelf_tab = self.create_bookshelf_tab()
         self.tab_widget.addTab(self.bookshelf_tab, '我的书架')
         
+        # 创建公众号信息区域
+        wechat_info_widget = self.create_wechat_info_widget()
+        
         # 添加组件到主布局
         main_layout.addWidget(title_label)
         main_layout.addWidget(self.tab_widget)
+        main_layout.addWidget(wechat_info_widget)
         
     def create_quick_read_tab(self):
         """创建快速阅读标签页"""
@@ -234,6 +261,103 @@ class MainWindow(QMainWindow):
         layout.addStretch()  # 添加弹性空间
         
         return tab
+    
+    def create_wechat_info_widget(self):
+        """创建公众号信息区域"""
+        # 创建主容器
+        wechat_widget = QFrame()
+        wechat_widget.setFrameStyle(QFrame.NoFrame)
+        wechat_widget.setStyleSheet(
+            'QFrame {'
+            '    background-color: #f8f9fa;'
+            '    margin: 5px;'
+            '}'
+        )
+        wechat_widget.setFixedHeight(180)
+        
+        # 创建水平布局
+        layout = QHBoxLayout(wechat_widget)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(15)
+        
+        # 左侧：公众号信息
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(5)
+        
+        # 公众号标题
+        title_label = QLabel('关注我的公众号')
+        title_label.setFont(QFont('Microsoft YaHei', 12, QFont.Bold))
+        title_label.setStyleSheet('color: #2c3e50;')
+        
+        # 公众号名称
+        name_label = QLabel('木瞳科技Pro')
+        name_label.setFont(QFont('Microsoft YaHei', 14, QFont.Bold))
+        name_label.setStyleSheet('color: #e74c3c; margin: 2px 0;')
+        
+        # 公众号描述
+        desc_label = QLabel('有趣的灵魂互相吸引')
+        desc_label.setFont(QFont('Microsoft YaHei', 10))
+        desc_label.setStyleSheet('color: #7f8c8d;')
+        desc_label.setWordWrap(True)
+        
+        # 扫码提示
+        scan_label = QLabel('扫描右侧二维码关注 →')
+        scan_label.setFont(QFont('Microsoft YaHei', 9))
+        scan_label.setStyleSheet('color: #95a5a6; margin-top: 5px;')
+        
+        info_layout.addWidget(title_label)
+        info_layout.addWidget(name_label)
+        info_layout.addWidget(desc_label)
+        info_layout.addWidget(scan_label)
+        info_layout.addStretch()
+        
+        # 右侧：二维码
+        qr_layout = QVBoxLayout()
+        qr_layout.setAlignment(Qt.AlignCenter)
+        
+        # 二维码标签
+        qr_label = QLabel()
+        qr_label.setFixedSize(150, 150)
+        qr_label.setAlignment(Qt.AlignCenter)
+        qr_label.setStyleSheet(
+            'QLabel {'
+            '    border: 1px solid #bdc3c7;'
+            '    border-radius: 4px;'
+            '    background-color: white;'
+            '}'
+        )
+        
+        # 加载二维码图片（使用相对路径）
+        try:
+            qr_path = 'qrcode.png'
+            
+            qr_pixmap = QPixmap(qr_path)
+            if not qr_pixmap.isNull():
+                # 缩放图片以适应标签大小
+                scaled_pixmap = qr_pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                qr_label.setPixmap(scaled_pixmap)
+            else:
+                # 如果图片加载失败，显示文字
+                qr_label.setText('二维码')
+                qr_label.setStyleSheet(
+                    qr_label.styleSheet() + 
+                    'color: #95a5a6; font-size: 12px;'
+                )
+        except Exception as e:
+            # 异常处理：显示文字替代
+            qr_label.setText('二维码')
+            qr_label.setStyleSheet(
+                qr_label.styleSheet() + 
+                'color: #95a5a6; font-size: 12px;'
+            )
+        
+        qr_layout.addWidget(qr_label)
+        
+        # 添加到主布局
+        layout.addLayout(info_layout, 3)  # 信息区域占3份
+        layout.addLayout(qr_layout, 1)    # 二维码区域占1份
+        
+        return wechat_widget
         
     def create_bookshelf_tab(self):
         """创建书架标签页"""
@@ -906,19 +1030,36 @@ class MainWindow(QMainWindow):
         # 创建托盘图标
         self.tray_icon = QSystemTrayIcon(self)
         
-        # 创建一个简单的图标（绿色圆点）
-        pixmap = QPixmap(16, 16)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(Qt.green)
-        painter.setPen(Qt.darkGreen)
-        painter.drawEllipse(2, 2, 12, 12)
-        painter.end()
+        # 设置托盘图标
+        # 优先使用PNG格式，因为Windows对PNG支持更好
+        if os.path.exists('logo.png'):
+            # 使用PNG格式的logo图标，创建多尺寸版本以确保在不同DPI下正确显示
+            icon = QIcon('logo.png')
+            # 添加不同尺寸的图标以提高兼容性
+            icon.addFile('logo.png', QSize(16, 16))
+            icon.addFile('logo.png', QSize(24, 24))
+            icon.addFile('logo.png', QSize(32, 32))
+        elif os.path.exists('logo.svg'):
+            # 备选：使用SVG格式的logo图标，创建多尺寸版本以确保在不同DPI下正确显示
+            icon = QIcon('logo.svg')
+            # 添加不同尺寸的图标以提高兼容性
+            icon.addFile('logo.svg', QSize(16, 16))
+            icon.addFile('logo.svg', QSize(24, 24))
+            icon.addFile('logo.svg', QSize(32, 32))
+        else:
+            # 创建一个简单的图标（绿色圆点）作为备选
+            pixmap = QPixmap(16, 16)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setBrush(Qt.green)
+            painter.setPen(Qt.darkGreen)
+            painter.drawEllipse(2, 2, 12, 12)
+            painter.end()
+            icon = QIcon(pixmap)
         
-        icon = QIcon(pixmap)
         self.tray_icon.setIcon(icon)
-        self.tray_icon.setToolTip("ReadFish")
+        self.tray_icon.setToolTip("ReadFish - 摸个鱼吧")
         
         # 创建托盘菜单
         tray_menu = QMenu()
@@ -983,6 +1124,43 @@ def main():
     app.setApplicationName('ReadFish')
     app.setApplicationVersion('1.0')
     app.setOrganizationName('ReadFish')
+    
+    # 在Windows上设置应用程序用户模型ID，确保任务栏图标正确显示
+    try:
+        import ctypes
+        # 设置应用程序用户模型ID，这有助于Windows正确识别应用程序
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('ReadFish.ReadFish.1.0')
+    except:
+        pass  # 如果设置失败，继续执行
+    
+    # 设置应用程序图标（用于任务栏和进程）
+    # 使用PNG格式，并确保正确设置
+    if os.path.exists('logo.png'):
+        # 使用PNG格式的logo图标
+        app_icon = QIcon('logo.png')
+        # 添加不同尺寸的图标以提高兼容性
+        app_icon.addFile('logo.png', QSize(16, 16))
+        app_icon.addFile('logo.png', QSize(24, 24))
+        app_icon.addFile('logo.png', QSize(32, 32))
+        app_icon.addFile('logo.png', QSize(48, 48))
+        app_icon.addFile('logo.png', QSize(64, 64))
+        # 设置应用程序图标
+        app.setWindowIcon(app_icon)
+        # 在Windows上，还需要设置应用程序图标属性
+        try:
+            app.setProperty('windowIcon', app_icon)
+        except:
+            pass
+    elif os.path.exists('logo.svg'):
+        # 备选：使用SVG格式的logo图标
+        app_icon = QIcon('logo.svg')
+        # 添加不同尺寸的图标以提高兼容性
+        app_icon.addFile('logo.svg', QSize(16, 16))
+        app_icon.addFile('logo.svg', QSize(24, 24))
+        app_icon.addFile('logo.svg', QSize(32, 32))
+        app_icon.addFile('logo.svg', QSize(48, 48))
+        app_icon.addFile('logo.svg', QSize(64, 64))
+        app.setWindowIcon(app_icon)
     
     # 设置应用程序在最后一个窗口关闭时不自动退出
     # 这样即使所有窗口都隐藏了，程序也会继续运行（通过托盘图标维持）

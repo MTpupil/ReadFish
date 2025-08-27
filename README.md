@@ -20,6 +20,11 @@
 - **从头阅读**: 重新开始阅读书籍
 - **阅读统计**: 显示阅读进度和时间
 
+### 📱 公众号引流
+- **公众号信息**: 主界面底部显示公众号信息
+- **二维码展示**: 提供二维码供用户扫描关注
+- **技术分享**: 关注"木瞳科技Pro"获取更多编程技术和工具推荐
+
 ### 🎯 目录功能
 - **智能解析**: 自动识别多种章节格式（《第X章》、【第X章】、第X章等）
 - **目录预览**: 显示完整的章节列表
@@ -231,7 +236,11 @@ ReadFish/
 ├── file_utils.py          # 文件工具模块
 ├── book_item_widget.py    # 书籍项目组件
 ├── contents_window.py     # 目录窗口
+├── reader_window.py       # 阅读窗口
+├── config_window.py       # 配置窗口
+├── table_of_contents.py   # 目录解析模块
 ├── migrate_data.py        # 数据迁移脚本
+├── qrcode.png             # 公众号二维码
 ├── requirements.txt       # 依赖包列表
 ├── README.md             # 项目说明文档
 └── .gitignore            # Git忽略文件
