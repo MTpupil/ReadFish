@@ -8,13 +8,35 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QMenu, QAction,
     QApplication, QMessageBox, QCheckBox
 )
+
+
+class NoZoomTextEdit(QTextEdit):
+    """禁用缩放功能的QTextEdit子类"""
+    
+    def zoomIn(self, range=1):
+        """禁用放大功能"""
+        pass
+    
+    def zoomOut(self, range=1):
+        """禁用缩小功能"""
+        pass
+    
+    def wheelEvent(self, event):
+        """重写滚轮事件，完全禁用缩放"""
+        # 不调用父类的wheelEvent，完全忽略滚轮事件
+        event.ignore()
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QEvent, QRect, QTimer
 from PyQt5.QtGui import QFont, QColor, QPalette, QPainter, QPen
 import ctypes
 from ctypes import wintypes
+import os
 
 from config_window import ConfigWindow
 from history_manager import HistoryManager
+from bookmark_manager import BookmarkManager
+from bookmark_window import BookmarkWindow
+from search_window import SearchWindow
+from toast_notification import ToastManager
 
 
 class ReaderWindow(QWidget):
@@ -34,6 +56,11 @@ class ReaderWindow(QWidget):
         self.history_manager = HistoryManager()
         self.file_path = file_path  # 当前阅读的文件路径
         self.title = title or "未知文档"  # 文档标题
+        
+        # 书签和搜索相关属性
+        self.bookmark_manager = BookmarkManager()
+        self.bookmark_window = None
+        self.search_window = None
         
         # 用于窗口拖动的变量
         self.drag_position = QPoint()
@@ -107,12 +134,16 @@ class ReaderWindow(QWidget):
         frame_layout.setSizeConstraint(QVBoxLayout.SetNoConstraint)  # 移除布局尺寸约束
         
         # 创建文本显示区域
-        self.text_edit = QTextEdit()
+        self.text_edit = NoZoomTextEdit()
         self.text_edit.setPlainText(self.content)
         self.text_edit.setReadOnly(True)  # 只读模式
         
         # 禁用文本选择
         self.text_edit.setTextInteractionFlags(Qt.NoTextInteraction)
+        
+        # 禁用字体缩放功能
+        self.text_edit.setProperty('zoomInFactor', 1.0)
+        self.text_edit.setProperty('zoomOutFactor', 1.0)
         
         # 设置鼠标光标为箭头形状，避免显示文本光标
         self.text_edit.setCursor(Qt.ArrowCursor)
@@ -773,6 +804,11 @@ class ReaderWindow(QWidget):
                 self.is_mouse_over = False
                 self.update_content_visibility()
                 return True
+            elif event.type() == QEvent.Wheel and obj == text_edit:
+                # 完全拦截文本编辑器的所有滚轮事件，防止任何字体调节
+                # 无论是否按下修饰键，都将滚轮事件传递给父窗口处理翻页功能
+                self.wheelEvent(event)
+                return True  # 阻止事件传递给QTextEdit，完全禁用其滚轮响应
         return super().eventFilter(obj, event)
         
     def enterEvent(self, event):
@@ -793,6 +829,26 @@ class ReaderWindow(QWidget):
         self.context_menu_showing = True
         
         menu = QMenu(self)
+        
+        # 书签功能区域（仅在有文件路径时显示）
+        if self.file_path:
+            # 添加书签
+            add_bookmark_action = QAction('添加书签', self)
+            add_bookmark_action.triggered.connect(self.add_bookmark)
+            menu.addAction(add_bookmark_action)
+            
+            # 书签管理
+            bookmark_action = QAction('书签', self)
+            bookmark_action.triggered.connect(self.show_bookmark_window)
+            menu.addAction(bookmark_action)
+            
+            # 全文搜索
+            search_action = QAction('搜索', self)
+            search_action.triggered.connect(self.show_search_window)
+            menu.addAction(search_action)
+            
+            # 分隔线
+            menu.addSeparator()
         
         # 配置选项
         config_action = QAction('配置设置', self)
@@ -838,6 +894,162 @@ class ReaderWindow(QWidget):
         self.config_window.show()
         self.config_window.raise_()
         self.config_window.activateWindow()
+        
+    def add_bookmark(self):
+        """添加书签到当前位置"""
+        if not self.file_path:
+            ToastManager.show_warning('无法为当前内容添加书签！', self)
+            return
+            
+        try:
+            # 获取当前阅读位置
+            current_line = self.current_line_index + 1  # 转换为1基索引
+            current_char_pos = self.get_current_char_position()
+            
+            # 获取当前行内容作为预览
+            if self.text_lines and 0 <= self.current_line_index < len(self.text_lines):
+                content_preview = self.text_lines[self.current_line_index].strip()
+                if len(content_preview) > 100:
+                    content_preview = content_preview[:100] + '...'
+            else:
+                content_preview = '无内容预览'
+                
+            # 生成书签名称
+            import datetime
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+            bookmark_name = f'书签 - {timestamp}'
+            
+            # 添加书签
+            bookmark_id = self.bookmark_manager.add_bookmark(
+                file_path=self.file_path,
+                title=self.title or os.path.basename(self.file_path),
+                name=bookmark_name,
+                line_number=current_line,
+                char_position=current_char_pos,
+                content_preview=content_preview
+            )
+            
+            if bookmark_id:
+                # 如果书签窗口已经打开，刷新书签列表显示
+                if hasattr(self, 'bookmark_window') and self.bookmark_window is not None:
+                    self.bookmark_window.load_bookmarks()
+            else:
+                ToastManager.show_error('添加书签失败！', self)
+        except Exception as e:
+            ToastManager.show_error(f'添加书签时发生错误：{str(e)}', self)
+            
+    def get_current_char_position(self):
+        """获取当前字符位置"""
+        try:
+            # 计算当前行之前的所有字符数
+            char_position = 0
+            for i in range(self.current_line_index):
+                if i < len(self.text_lines):
+                    char_position += len(self.text_lines[i]) + 1  # +1 for newline
+            return char_position
+        except:
+            return 0
+            
+    def show_bookmark_window(self):
+        """显示书签管理窗口"""
+        if not self.file_path:
+            ToastManager.show_warning('无法为当前内容显示书签！', self)
+            return
+            
+        try:
+            # 创建或显示书签窗口
+            if self.bookmark_window is None or not self.bookmark_window.isVisible():
+                # 如果窗口不存在或已关闭，创建新的窗口实例
+                self.bookmark_window = BookmarkWindow(self.file_path, self.title, self.bookmark_manager, self)
+                self.bookmark_window.bookmark_selected.connect(self.goto_bookmark)
+                # 连接窗口关闭信号，确保窗口关闭时清理引用
+                self.bookmark_window.finished.connect(lambda: setattr(self, 'bookmark_window', None))
+            else:
+                # 如果窗口已存在且可见，刷新书签数据
+                self.bookmark_window.load_bookmarks()
+                
+            self.bookmark_window.show()
+            self.bookmark_window.raise_()
+            self.bookmark_window.activateWindow()
+            
+        except Exception as e:
+            ToastManager.show_error(f'打开书签窗口时发生错误：{str(e)}', self)
+            
+    def goto_bookmark(self, bookmark):
+        """跳转到指定书签位置"""
+        try:
+            line_number = bookmark.get('line_number', 1)
+            char_position = bookmark.get('char_position', 0)
+            
+            # 跳转到指定行
+            self.jump_to_line(line_number)
+            
+            # 保存阅读位置
+            self.save_reading_position()
+            
+            ToastManager.show_success(f'已跳转到书签：{bookmark.get("name", "未知书签")}', self)
+            
+        except Exception as e:
+            ToastManager.show_error(f'跳转到书签时发生错误：{str(e)}', self)
+            
+    def show_search_window(self):
+        """显示全文搜索窗口"""
+        if not self.file_path:
+            ToastManager.show_warning('无法为当前内容进行搜索！', self)
+            return
+            
+        try:
+            # 创建或显示搜索窗口
+            if self.search_window is None:
+                self.search_window = SearchWindow(self.file_path, self.title, self)
+                self.search_window.search_result_selected.connect(self.goto_search_result)
+                
+            self.search_window.show()
+            self.search_window.raise_()
+            self.search_window.activateWindow()
+            
+        except Exception as e:
+            ToastManager.show_error(f'打开搜索窗口时发生错误：{str(e)}', self)
+            
+    def goto_search_result(self, line_number):
+        """跳转到搜索结果位置"""
+        try:
+            # 跳转到指定行
+            self.jump_to_line(line_number)
+            
+            # 保存阅读位置
+            self.save_reading_position()
+            
+            ToastManager.show_success(f'已跳转到第 {line_number} 行', self)
+            
+        except Exception as e:
+            ToastManager.show_error(f'跳转到搜索结果时发生错误：{str(e)}', self)
+            
+    def save_reading_position(self):
+        """保存当前阅读位置到历史记录"""
+        if not self.file_path or not hasattr(self, 'history_manager'):
+            return
+            
+        try:
+            # 使用当前的行索引和字符偏移
+            current_line_index = getattr(self, 'current_line_index', 0)
+            current_char_offset = getattr(self, 'current_char_offset', 0)
+            
+            # 获取总行数
+            total_lines = len(self.text_lines) if hasattr(self, 'text_lines') and self.text_lines else 0
+            
+            # 更新阅读位置
+            self.history_manager.update_reading_position(
+                file_path=self.file_path,
+                title=self.title or os.path.basename(self.file_path),
+                current_line_index=current_line_index,
+                current_char_offset=current_char_offset,
+                total_lines=total_lines
+            )
+            
+        except Exception as e:
+            # 保存阅读位置失败，不影响正常使用
+            pass
         
     def on_config_changed(self):
         """配置改变时的处理"""

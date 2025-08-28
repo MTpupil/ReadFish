@@ -894,6 +894,8 @@ class MainWindow(QMainWindow):
         file_title = book_info.get('display_name', os.path.basename(file_path))
         reader = ReaderWindow(content, self.config_manager, self, 
                             file_path=file_path, title=file_title, restore_position=False)
+        # 传递历史管理器给阅读器窗口
+        reader.history_manager = self.history_manager
         
         # 显示阅读器窗口
         reader.show()
@@ -982,6 +984,8 @@ class MainWindow(QMainWindow):
         file_title = os.path.basename(self.selected_file)
         self.reader_window = ReaderWindow(content, self.config_manager, self, 
                                         file_path=self.selected_file, title=file_title)
+        # 传递历史管理器给阅读器窗口
+        self.reader_window.history_manager = self.history_manager
         self.reader_window.show()
         
     def start_reading_without_history(self, file_path):
@@ -1008,6 +1012,8 @@ class MainWindow(QMainWindow):
         file_title = os.path.basename(file_path)
         self.reader_window = ReaderWindow(content, self.config_manager, self, 
                                         file_path=file_path, title=file_title, restore_position=False)
+        # 传递历史管理器给阅读器窗口
+        self.reader_window.history_manager = self.history_manager
         self.reader_window.show()
         
     def show_main_window(self):
