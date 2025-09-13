@@ -569,6 +569,21 @@ class MainWindow(QMainWindow):
         """刷新书架显示"""
         self.book_list.clear()
         
+        # 检查并清理不存在的文件记录
+        books_to_remove = []
+        for book_name, book_info in self.books_data.items():
+            file_path = book_info.get('file_path', '')
+            if file_path and not os.path.exists(file_path):
+                books_to_remove.append(book_name)
+        
+        # 移除不存在的文件记录
+        for book_name in books_to_remove:
+            del self.books_data[book_name]
+        
+        # 如果有记录被移除，保存数据
+        if books_to_remove:
+            self.save_bookshelf_data()
+        
         if not self.books_data:
             self.bookshelf_status_label.setText('书架为空，请导入书籍')
             self.bookshelf_status_label.show()
@@ -580,10 +595,13 @@ class MainWindow(QMainWindow):
         for book_name, book_info in self.books_data.items():
             # 创建列表项
             item = QListWidgetItem()
-            item.setData(Qt.UserRole, book_info)  # 存储书籍信息
+            # 确保book_info包含name字段
+            book_info_with_name = book_info.copy()
+            book_info_with_name['name'] = book_name
+            item.setData(Qt.UserRole, book_info_with_name)  # 存储书籍信息
             
             # 创建自定义组件
-            book_widget = BookItemWidget(book_name, book_info)
+            book_widget = BookItemWidget(book_name, book_info_with_name)
             
             # 连接信号
             book_widget.continue_reading.connect(self.continue_reading_from_shelf)
@@ -668,31 +686,63 @@ class MainWindow(QMainWindow):
             
     def delete_book(self, item):
         """删除书籍"""
-        book_name = item.text()
+        # 从item的UserRole数据中获取书籍信息
+        book_info = item.data(Qt.UserRole)
+        if not book_info:
+            QMessageBox.warning(self, '错误', '无法获取书籍信息！')
+            return
+            
+        # 从书籍信息中获取书名，如果没有name字段则从books_data中查找
+        book_name = book_info.get('name', '')
+        if not book_name:
+            # 通过file_path在books_data中查找对应的书名
+            file_path = book_info.get('file_path', '')
+            for name, info in self.books_data.items():
+                if info.get('file_path') == file_path:
+                    book_name = name
+                    break
+        
+        if not book_name:
+            book_name = '未知书籍'
+            
         reply = QMessageBox.question(
             self, 
             '确认删除', 
-            f'确定要删除书籍"{book_name}"吗？\n\n注意：这将同时删除书架记录和文件！',
+            f'确定要删除书籍《{book_name}》吗？\n\n注意：这将同时删除书架记录和文件！',
             QMessageBox.Yes | QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
             try:
                 # 获取文件路径并删除文件
-                book_info = self.books_data[book_name]
-                file_path = book_info['file_path']
+                file_path = book_info.get('file_path', '')
                 
-                if os.path.exists(file_path):
+                if file_path and os.path.exists(file_path):
                     os.remove(file_path)
                     
-                # 从数据中删除记录
-                del self.books_data[book_name]
+                # 从书架数据中删除记录（确保删除正确的记录）
+                if book_name in self.books_data:
+                    del self.books_data[book_name]
+                else:
+                    # 如果按书名找不到，尝试按文件路径删除
+                    books_to_remove = []
+                    for name, info in self.books_data.items():
+                        if info.get('file_path') == file_path:
+                            books_to_remove.append(name)
+                    
+                    for name in books_to_remove:
+                        del self.books_data[name]
+                
+                # 从历史记录中移除
+                if file_path:
+                    self.history_manager.remove_book(file_path)
                 
                 # 保存数据并刷新显示
                 self.save_bookshelf_data()
                 self.refresh_bookshelf()
+                self.update_continue_button_state()
                 
-                QMessageBox.information(self, '成功', f'书籍"{book_name}"已删除！')
+                QMessageBox.information(self, '成功', f'书籍《{book_name}》已删除！')
                 
             except Exception as e:
                 QMessageBox.critical(self, '错误', f'删除书籍失败：{str(e)}')
@@ -814,21 +864,46 @@ class MainWindow(QMainWindow):
                 
     def delete_book_from_widget(self, book_info):
         """从组件删除书籍"""
+        # 获取书名，优先从book_info中获取，如果没有则通过file_path查找
         book_name = book_info.get('name', '')
         file_path = book_info.get('file_path', '')
         
+        # 如果book_info中没有name字段，通过file_path在books_data中查找
+        if not book_name and file_path:
+            for name, info in self.books_data.items():
+                if info.get('file_path') == file_path:
+                    book_name = name
+                    break
+        
+        # 如果还是没有找到书名，使用默认值
+        if not book_name:
+            book_name = '未知书籍'
+        
         reply = QMessageBox.question(
             self, '确认删除', 
-            f'确定要删除书籍《{book_name}》吗？\n\n注意：这只会从书架中移除，不会删除原文件。',
+            f'确定要删除书籍《{book_name}》吗？\n\n注意：这将同时删除书架记录和原文件！',
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
             try:
-                # 从书架数据中移除
+                # 删除原文件
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                
+                # 从书架数据中移除（确保删除正确的记录）
                 if book_name in self.books_data:
                     del self.books_data[book_name]
+                else:
+                    # 如果按书名找不到，尝试按文件路径删除
+                    books_to_remove = []
+                    for name, info in self.books_data.items():
+                        if info.get('file_path') == file_path:
+                            books_to_remove.append(name)
+                    
+                    for name in books_to_remove:
+                        del self.books_data[name]
                     
                 # 从历史记录中移除
                 if file_path:
@@ -839,7 +914,7 @@ class MainWindow(QMainWindow):
                 self.refresh_bookshelf()
                 self.update_continue_button_state()
                 
-                QMessageBox.information(self, '成功', '书籍已从书架中移除！')
+                QMessageBox.information(self, '成功', f'书籍《{book_name}》已删除！')
                 
             except Exception as e:
                 QMessageBox.critical(self, '错误', f'删除书籍失败：{str(e)}')
