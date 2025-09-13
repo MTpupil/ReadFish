@@ -233,7 +233,9 @@ class SearchWindow(QDialog):
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
         
         # 设置窗口图标
-        if os.path.exists('logo.png'):
+        if os.path.exists('logo.ico'):
+            self.setWindowIcon(QIcon('logo.ico'))
+        elif os.path.exists('logo.png'):
             self.setWindowIcon(QIcon('logo.png'))
         elif os.path.exists('logo.svg'):
             self.setWindowIcon(QIcon('logo.svg'))

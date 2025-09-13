@@ -23,6 +23,7 @@ from config_manager import ConfigManager
 from history_manager import HistoryManager
 from book_item_widget import BookItemWidget
 from file_utils import detect_encoding_and_read_file
+from resource_path import get_resource_path, find_icon_file
 
 
 class MainWindow(QMainWindow):
@@ -59,27 +60,18 @@ class MainWindow(QMainWindow):
         self.setFixedSize(600, 720)  # 增大窗口尺寸以容纳书架功能和公众号信息
         
         # 设置应用程序图标
-        # 优先使用PNG格式，因为Windows对PNG支持更好
-        if os.path.exists('logo.png'):
-            # 创建图标并设置多个尺寸以确保在任务栏正确显示
-            icon = QIcon('logo.png')
-            # 添加不同尺寸的图标以提高兼容性
-            icon.addFile('logo.png', QSize(16, 16))
-            icon.addFile('logo.png', QSize(24, 24))
-            icon.addFile('logo.png', QSize(32, 32))
-            icon.addFile('logo.png', QSize(48, 48))
-            icon.addFile('logo.png', QSize(64, 64))
-            self.setWindowIcon(icon)
-        elif os.path.exists('logo.svg'):
-            # 备选：使用SVG格式的图标
-            icon = QIcon('logo.svg')
-            # 添加不同尺寸的图标以提高兼容性
-            icon.addFile('logo.svg', QSize(16, 16))
-            icon.addFile('logo.svg', QSize(24, 24))
-            icon.addFile('logo.svg', QSize(32, 32))
-            icon.addFile('logo.svg', QSize(48, 48))
-            icon.addFile('logo.svg', QSize(64, 64))
-            self.setWindowIcon(icon)
+        # 使用资源路径处理模块来正确获取图标文件路径
+        icon_path = find_icon_file()
+        if icon_path:
+            # 找到图标文件，创建图标对象
+            icon = QIcon(icon_path)
+            if not icon.isNull():
+                self.setWindowIcon(icon)
+                print(f"[DEBUG] 窗口图标设置成功: {icon_path}")
+            else:
+                print(f"[WARNING] 图标文件加载失败: {icon_path}")
+        else:
+            print(f"[ERROR] 未找到任何图标文件")
         
         # 设置窗口居中
         self.center_window()
@@ -327,23 +319,38 @@ class MainWindow(QMainWindow):
             '}'
         )
         
-        # 加载二维码图片（使用相对路径）
+        # 加载二维码图片（使用资源路径处理模块）
         try:
-            qr_path = 'qrcode.png'
+            # 使用资源路径处理模块获取正确的二维码图片路径
+            qr_path = get_resource_path('qrcode.png')
+            print(f"[DEBUG] 尝试加载二维码图片: {qr_path}")
             
-            qr_pixmap = QPixmap(qr_path)
-            if not qr_pixmap.isNull():
-                # 缩放图片以适应标签大小
-                scaled_pixmap = qr_pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                qr_label.setPixmap(scaled_pixmap)
+            # 检查文件是否存在
+            if os.path.exists(qr_path):
+                qr_pixmap = QPixmap(qr_path)
+                if not qr_pixmap.isNull():
+                    # 缩放图片以适应标签大小
+                    scaled_pixmap = qr_pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    qr_label.setPixmap(scaled_pixmap)
+                    print(f"[DEBUG] 二维码图片加载成功: {qr_path}")
+                else:
+                    print(f"[WARNING] 二维码图片加载失败(null pixmap): {qr_path}")
+                    # 如果图片加载失败，显示文字
+                    qr_label.setText('二维码')
+                    qr_label.setStyleSheet(
+                        qr_label.styleSheet() + 
+                        'color: #95a5a6; font-size: 12px;'
+                    )
             else:
-                # 如果图片加载失败，显示文字
+                print(f"[ERROR] 二维码图片文件不存在: {qr_path}")
+                # 如果文件不存在，显示文字
                 qr_label.setText('二维码')
                 qr_label.setStyleSheet(
                     qr_label.styleSheet() + 
                     'color: #95a5a6; font-size: 12px;'
                 )
         except Exception as e:
+            print(f"[ERROR] 二维码图片加载异常: {e}")
             # 异常处理：显示文字替代
             qr_label.setText('二维码')
             qr_label.setStyleSheet(
@@ -1026,6 +1033,21 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         
+    def create_fallback_icon(self):
+        """
+        创建备选图标（绿色圆点）
+        当无法加载正常图标时使用
+        """
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(Qt.green)
+        painter.setPen(Qt.darkGreen)
+        painter.drawEllipse(2, 2, 12, 12)
+        painter.end()
+        return QIcon(pixmap)
+    
     def init_tray_icon(self):
         """初始化系统托盘图标"""
         # 检查系统是否支持托盘图标
@@ -1037,32 +1059,21 @@ class MainWindow(QMainWindow):
         self.tray_icon = QSystemTrayIcon(self)
         
         # 设置托盘图标
-        # 优先使用PNG格式，因为Windows对PNG支持更好
-        if os.path.exists('logo.png'):
-            # 使用PNG格式的logo图标，创建多尺寸版本以确保在不同DPI下正确显示
-            icon = QIcon('logo.png')
-            # 添加不同尺寸的图标以提高兼容性
-            icon.addFile('logo.png', QSize(16, 16))
-            icon.addFile('logo.png', QSize(24, 24))
-            icon.addFile('logo.png', QSize(32, 32))
-        elif os.path.exists('logo.svg'):
-            # 备选：使用SVG格式的logo图标，创建多尺寸版本以确保在不同DPI下正确显示
-            icon = QIcon('logo.svg')
-            # 添加不同尺寸的图标以提高兼容性
-            icon.addFile('logo.svg', QSize(16, 16))
-            icon.addFile('logo.svg', QSize(24, 24))
-            icon.addFile('logo.svg', QSize(32, 32))
+        # 使用资源路径处理模块来正确获取图标文件路径
+        icon_path = find_icon_file()
+        if icon_path:
+            # 找到图标文件，创建图标对象
+            icon = QIcon(icon_path)
+            if icon.isNull():
+                print(f"[WARNING] 托盘图标加载失败: {icon_path}")
+                # 创建备选图标（绿色圆点）
+                icon = self.create_fallback_icon()
+            else:
+                print(f"[DEBUG] 托盘图标设置成功: {icon_path}")
         else:
-            # 创建一个简单的图标（绿色圆点）作为备选
-            pixmap = QPixmap(16, 16)
-            pixmap.fill(Qt.transparent)
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setBrush(Qt.green)
-            painter.setPen(Qt.darkGreen)
-            painter.drawEllipse(2, 2, 12, 12)
-            painter.end()
-            icon = QIcon(pixmap)
+            print(f"[ERROR] 未找到图标文件，使用备选图标")
+            # 创建备选图标（绿色圆点）
+            icon = self.create_fallback_icon()
         
         self.tray_icon.setIcon(icon)
         self.tray_icon.setToolTip("ReadFish - 摸个鱼吧")
@@ -1140,33 +1151,26 @@ def main():
         pass  # 如果设置失败，继续执行
     
     # 设置应用程序图标（用于任务栏和进程）
-    # 使用PNG格式，并确保正确设置
-    if os.path.exists('logo.png'):
-        # 使用PNG格式的logo图标
-        app_icon = QIcon('logo.png')
-        # 添加不同尺寸的图标以提高兼容性
-        app_icon.addFile('logo.png', QSize(16, 16))
-        app_icon.addFile('logo.png', QSize(24, 24))
-        app_icon.addFile('logo.png', QSize(32, 32))
-        app_icon.addFile('logo.png', QSize(48, 48))
-        app_icon.addFile('logo.png', QSize(64, 64))
-        # 设置应用程序图标
-        app.setWindowIcon(app_icon)
-        # 在Windows上，还需要设置应用程序图标属性
-        try:
-            app.setProperty('windowIcon', app_icon)
-        except:
-            pass
-    elif os.path.exists('logo.svg'):
-        # 备选：使用SVG格式的logo图标
-        app_icon = QIcon('logo.svg')
-        # 添加不同尺寸的图标以提高兼容性
-        app_icon.addFile('logo.svg', QSize(16, 16))
-        app_icon.addFile('logo.svg', QSize(24, 24))
-        app_icon.addFile('logo.svg', QSize(32, 32))
-        app_icon.addFile('logo.svg', QSize(48, 48))
-        app_icon.addFile('logo.svg', QSize(64, 64))
-        app.setWindowIcon(app_icon)
+    # 使用资源路径处理模块来正确获取图标文件路径
+    from resource_path import find_icon_file
+    
+    icon_path = find_icon_file()
+    if icon_path:
+        # 找到图标文件，创建图标对象
+        app_icon = QIcon(icon_path)
+        if not app_icon.isNull():
+            # 设置应用程序图标
+            app.setWindowIcon(app_icon)
+            # 在Windows上，还需要设置应用程序图标属性
+            try:
+                app.setProperty('windowIcon', app_icon)
+            except:
+                pass
+            print(f"[DEBUG] 应用程序图标设置成功: {icon_path}")
+        else:
+            print(f"[WARNING] 应用程序图标加载失败: {icon_path}")
+    else:
+        print(f"[ERROR] 未找到任何图标文件，应用程序将使用默认图标")
     
     # 设置应用程序在最后一个窗口关闭时不自动退出
     # 这样即使所有窗口都隐藏了，程序也会继续运行（通过托盘图标维持）

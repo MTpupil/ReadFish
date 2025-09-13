@@ -1,0 +1,53 @@
+ReadFish 软件许可协议
+
+版权所有 (c) 2024 ReadFish Team
+
+本软件及其相关文档文件（以下简称"软件"）仅供个人学习和非商业用途使用。
+
+使用条款：
+
+1. 个人使用：您可以免费使用本软件进行个人阅读和学习。
+
+2. 禁止商业用途：未经明确书面许可，不得将本软件用于任何商业目的。
+
+3. 分发限制：您可以分享本软件，但必须保持软件的完整性，包括本许可证文件。
+
+4. 修改限制：您可以查看和学习源代码，但不得修改后重新分发，除非获得明确许可。
+
+5. 免责声明：本软件按"现状"提供，不提供任何明示或暗示的保证。作者不对使用本软件造成的任何损失承担责任。
+
+6. 合规使用：使用者应遵守所在地区的法律法规以及所在单位的规章制度。
+
+7. 数据安全：本软件不会收集或传输用户的个人数据，所有配置和阅读记录仅保存在本地。
+
+通过安装和使用本软件，您表示同意遵守上述条款。如果您不同意这些条款，请不要安装或使用本软件。
+
+如有疑问，请联系开发团队。
+
+---
+
+ReadFish Software License Agreement
+
+Copyright (c) 2024 ReadFish Team
+
+This software and its associated documentation files (the "Software") are provided for personal learning and non-commercial use only.
+
+Terms of Use:
+
+1. Personal Use: You may use this software free of charge for personal reading and learning purposes.
+
+2. Commercial Use Prohibited: Commercial use of this software is prohibited without explicit written permission.
+
+3. Distribution Restrictions: You may share this software but must maintain its integrity, including this license file.
+
+4. Modification Restrictions: You may view and study the source code but may not redistribute modified versions without explicit permission.
+
+5. Disclaimer: This software is provided "as is" without any express or implied warranties. The authors are not liable for any damages resulting from the use of this software.
+
+6. Compliance: Users must comply with local laws and regulations as well as their organization's policies.
+
+7. Data Security: This software does not collect or transmit personal data. All configurations and reading records are stored locally only.
+
+By installing and using this software, you agree to comply with the above terms. If you do not agree to these terms, please do not install or use this software.
+
+For questions, please contact the development team.
