@@ -17,7 +17,7 @@ from toast_notification import ToastManager
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt5.QtGui import QFont, QIcon, QTextCharFormat, QColor
 
-from file_utils import detect_encoding_and_read_file
+from file_utils import detect_encoding_and_read_file, read_file_content
 
 
 class SearchThread(QThread):
@@ -41,13 +41,11 @@ class SearchThread(QThread):
     def run(self):
         """执行搜索"""
         try:
-            # 读取文件内容
-            result = detect_encoding_and_read_file(self.file_path)
-            if not result or not result[0]:
-                self.search_error.emit('无法读取文件内容')
+            # 读取文件内容（支持TXT和EPUB）
+            content, error_message = read_file_content(self.file_path)
+            if content is None:
+                self.search_error.emit(f'无法读取文件内容：{error_message}')
                 return
-            
-            content = result[0]  # 获取文件内容
                 
             lines = content.split('\n')
             total_lines = len(lines)

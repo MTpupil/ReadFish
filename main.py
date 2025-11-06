@@ -22,7 +22,7 @@ from reader_window import ReaderWindow
 from config_manager import ConfigManager
 from history_manager import HistoryManager
 from book_item_widget import BookItemWidget
-from file_utils import detect_encoding_and_read_file
+from file_utils import detect_encoding_and_read_file, read_file_content
 from resource_path import get_resource_path, find_icon_file
 
 
@@ -501,12 +501,12 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, '错误', f'保存书架数据失败：{str(e)}')
             
     def import_book(self):
-        """导入书籍到书架"""
+        """导入书籍到书架（支持TXT和EPUB格式）"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            '选择要导入的txt文件',
+            '选择要导入的书籍文件（支持TXT和EPUB格式）',
             '',
-            'Text files (*.txt);;All files (*)'
+            'Text files (*.txt);;EPUB files (*.epub);;All files (*)'
         )
         
         if not file_path:
@@ -958,11 +958,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, '文件不存在', f'文件不存在：{file_path}')
             return
             
-        # 使用智能编码检测读取文件
-        content, encoding = detect_encoding_and_read_file(file_path)
+        # 使用智能文件读取函数（支持TXT和EPUB）
+        content, error_message = read_file_content(file_path)
         
         if content is None:
-            QMessageBox.critical(self, '错误', '无法读取文件，可能是编码问题或文件损坏！')
+            QMessageBox.critical(self, '错误', f'无法读取文件：{error_message}')
             return
             
         if not content.strip():
@@ -1019,12 +1019,12 @@ class MainWindow(QMainWindow):
         )
         
     def select_file(self):
-        """选择txt文件"""
+        """选择阅读文件（支持TXT和EPUB格式）"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            '选择txt文件',
+            '选择阅读文件（支持TXT和EPUB格式）',
             '',
-            'Text files (*.txt);;All files (*)'
+            'Text files (*.txt);;EPUB files (*.epub);;All files (*)'
         )
         
         if file_path:
@@ -1044,14 +1044,14 @@ class MainWindow(QMainWindow):
     def start_reading(self):
         """开始阅读 - 隐藏主窗口并显示阅读窗口"""
         if not self.selected_file:
-            QMessageBox.warning(self, '警告', '请先选择一个txt文件！')
+            QMessageBox.warning(self, '警告', '请先选择一个文件！')
             return
             
-        # 使用智能编码检测读取文件
-        content, encoding = detect_encoding_and_read_file(self.selected_file)
+        # 使用智能文件读取函数（支持TXT和EPUB）
+        content, error_message = read_file_content(self.selected_file)
         
         if content is None:
-            QMessageBox.critical(self, '错误', '无法读取文件，可能是编码问题或文件损坏！')
+            QMessageBox.critical(self, '错误', f'无法读取文件：{error_message}')
             return
             
         if not content.strip():
@@ -1076,11 +1076,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, '警告', '文件不存在！')
             return
             
-        # 使用智能编码检测读取文件
-        content, encoding = detect_encoding_and_read_file(file_path)
+        # 使用智能文件读取函数（支持TXT和EPUB）
+        content, error_message = read_file_content(file_path)
         
         if content is None:
-            QMessageBox.critical(self, '错误', '无法读取文件，可能是编码问题或文件损坏！')
+            QMessageBox.critical(self, '错误', f'无法读取文件：{error_message}')
             return
             
         if not content.strip():

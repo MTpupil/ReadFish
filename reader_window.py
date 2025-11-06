@@ -137,9 +137,14 @@ class ReaderWindow(QWidget):
         self.text_edit = NoZoomTextEdit()
         self.text_edit.setPlainText(self.content)
         self.text_edit.setReadOnly(True)  # 只读模式
-        
+
         # 禁用文本选择
         self.text_edit.setTextInteractionFlags(Qt.NoTextInteraction)
+
+        # 禁止文本编辑器获取键盘焦点，确保方向键事件由ReaderWindow接收
+        # 说明：之前方向键不生效的原因是焦点可能在其他窗口或被子控件抢占，
+        # 将文本编辑器的焦点策略设为NoFocus可以避免其拦截键盘事件。
+        self.text_edit.setFocusPolicy(Qt.NoFocus)
         
         # 禁用字体缩放功能
         self.text_edit.setProperty('zoomInFactor', 1.0)
@@ -303,8 +308,16 @@ class ReaderWindow(QWidget):
         document = self.text_edit.document()
         doc_margin = document.documentMargin()
         
-        # 计算实际可用宽度，减少保守的边距估算
-        available_width = text_edit_width - left_margin - right_margin - (doc_margin * 2) - 5  # 只留5px安全边距
+        # 获取滚动条宽度（即使隐藏也可能占用空间）
+        scrollbar_width = self.text_edit.verticalScrollBar().sizeHint().width() if self.text_edit.verticalScrollBar().isVisible() else 0
+        
+        # 计算实际可用宽度，使用更保守的安全边距
+        # 增加安全边距到20px，并考虑可能的滚动条宽度和字体渲染误差
+        safety_margin = 20
+        available_width = text_edit_width - left_margin - right_margin - (doc_margin * 2) - scrollbar_width - safety_margin
+        
+        # 确保可用宽度为正数
+        available_width = max(50, available_width)  # 至少保证50px宽度
         
         # 如果有当前行文本，使用实际文本测量
         if current_line:
@@ -317,20 +330,30 @@ class ReaderWindow(QWidget):
                 test_text = current_line[:mid]
                 text_width = font_metrics.width(test_text)
                 
-                if text_width <= available_width:
+                # 为了更保险，在二分查找中也留一些余量
+                if text_width <= available_width - 5:  # 额外留5px余量
                     max_chars = mid
                     left = mid + 1
                 else:
                     right = mid - 1
+            
+            # 最终再次验证，确保选择的字符数不会导致截断
+            if max_chars > 1:
+                final_text = current_line[:max_chars]
+                final_width = font_metrics.width(final_text)
+                # 如果最终宽度太接近边界，减少一个字符作为安全措施
+                if final_width > available_width - 10:
+                    max_chars = max(1, max_chars - 1)
                     
             return max(1, max_chars)
         else:
             # 没有具体文本时，使用平均字符宽度估算
-            # 使用更小的安全系数
+            # 使用更保守的安全系数
             avg_char_width = font_metrics.averageCharWidth()
             
             if avg_char_width > 0:
-                visible_chars = max(1, int(available_width / avg_char_width))
+                # 使用更保守的计算，留出更多余量
+                visible_chars = max(1, int((available_width - 10) / avg_char_width))
             else:
                 visible_chars = 10  # 默认值
                 
@@ -632,6 +655,15 @@ class ReaderWindow(QWidget):
             self.content_visible = should_show
             if should_show:
                 self.show()  # 显示整个窗口
+                # 当内容显示时主动请求键盘焦点，确保方向键可用
+                # activateWindow可以让窗口成为活动窗口，setFocus确保键盘事件传递到ReaderWindow
+                # 注意：我们不将焦点给text_edit，以避免其拦截方向键（已设为NoFocus）
+                try:
+                    self.activateWindow()
+                except Exception:
+                    # 某些系统环境下activateWindow可能受限，忽略异常
+                    pass
+                self.setFocus(Qt.OtherFocusReason)
             else:
                 self.hide()  # 隐藏整个窗口
                 
@@ -1151,6 +1183,10 @@ class ReaderWindow(QWidget):
         
     def keyPressEvent(self, event):
         """键盘按键事件"""
+        # 如果内容未显示，不处理方向键翻页，避免误触
+        # 只有当文字显示时，才允许方向键翻页（符合用户期望的交互）
+        content_visible_now = getattr(self, 'content_visible', True)
+        
         # 检查是否是自定义按键
         key_pressed = False
         if self.custom_key == 'ctrl' and event.key() == Qt.Key_Control:
@@ -1188,10 +1224,19 @@ class ReaderWindow(QWidget):
                 QApplication.quit()
         # 上键翻页
         elif event.key() == Qt.Key_Up:
-            self.page_up()
+            if content_visible_now:
+                self.page_up()
         # 下键翻页
         elif event.key() == Qt.Key_Down:
-            self.page_down()
+            if content_visible_now:
+                self.page_down()
+        # PageUp/PageDown 支持 - 常见期望的翻页键
+        elif event.key() == Qt.Key_PageUp:
+            if content_visible_now:
+                self.page_up()
+        elif event.key() == Qt.Key_PageDown:
+            if content_visible_now:
+                self.page_down()
         else:
             super().keyPressEvent(event)
             

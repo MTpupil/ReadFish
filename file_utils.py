@@ -1,11 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 文件工具模块
-提供文件编码检测和读取功能
+提供文件编码检测和读取功能，支持TXT和EPUB格式
 """
 
 import os
 from typing import Optional, Tuple
+
+# 导入EPUB工具模块
+try:
+    from epub_utils import read_epub_file, is_epub_file
+except ImportError:
+    # 如果EPUB工具不可用，提供空实现
+    def read_epub_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
+        return None, "EPUB支持未安装"
+    
+    def is_epub_file(file_path: str) -> bool:
+        return False
 
 
 def detect_encoding_and_read_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
@@ -107,3 +118,43 @@ def detect_encoding(file_path: str) -> Optional[str]:
     """
     content, encoding = detect_encoding_and_read_file(file_path)
     return encoding if content else None
+
+
+def read_file_content(file_path: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    智能读取文件内容，支持TXT和EPUB格式
+    
+    Args:
+        file_path: 文件路径
+        
+    Returns:
+        (content, error_message): 文件内容和错误信息，如果成功则error_message为None
+    """
+    if not os.path.exists(file_path):
+        return None, "文件不存在"
+    
+    # 检查文件扩展名
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    if file_ext == '.txt':
+        # 处理TXT文件
+        content, encoding = detect_encoding_and_read_file(file_path)
+        if content is None:
+            return None, "无法读取TXT文件，可能是编码问题或文件损坏"
+        return content, None
+    
+    elif file_ext == '.epub':
+        # 处理EPUB文件
+        return read_epub_file(file_path)
+    
+    else:
+        # 未知格式，尝试自动检测
+        if is_epub_file(file_path):
+            return read_epub_file(file_path)
+        else:
+            # 尝试作为TXT文件读取
+            content, encoding = detect_encoding_and_read_file(file_path)
+            if content is not None:
+                return content, None
+            else:
+                return None, f"不支持的文件格式：{file_ext}"

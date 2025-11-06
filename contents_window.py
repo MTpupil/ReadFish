@@ -14,7 +14,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt5.QtGui import QFont, QIcon
 
 from table_of_contents import TableOfContents
-from file_utils import detect_encoding_and_read_file
+from file_utils import detect_encoding_and_read_file, read_file_content
 
 
 class ContentsParseThread(QThread):
@@ -55,8 +55,11 @@ class ContentsParseThread(QThread):
             self.parse_error.emit(str(e))
             
     def _read_file_with_encoding_detection(self):
-        """智能检测文件编码并读取内容"""
-        return detect_encoding_and_read_file(self.file_path)
+        """智能检测文件编码并读取内容（支持TXT和EPUB）"""
+        content, error_message = read_file_content(self.file_path)
+        if content is None:
+            raise Exception(f"无法读取文件：{error_message}")
+        return content, None  # 返回内容，编码信息设为None
 
 
 class ContentsWindow(QDialog):
