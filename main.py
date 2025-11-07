@@ -36,6 +36,8 @@ class MainWindow(QMainWindow):
         self.reader_window = None
         self.selected_file = None
         self.tray_icon = None
+        # 应用退出标志：用于避免退出时短暂显示主窗口
+        self.exiting = False
         
         # 书架相关属性 - 使用AppData目录
         appdata_dir = os.path.expanduser('~\\AppData\\Roaming\\ReadFish')
@@ -1185,6 +1187,8 @@ class MainWindow(QMainWindow):
             
     def quit_application(self):
         """退出应用程序"""
+        # 设置退出标志，通知子窗口不要唤起主窗口
+        self.exiting = True
         # 停止阅读窗口的定时器
         if self.reader_window:
             self.reader_window.close()

@@ -151,7 +151,7 @@ class ReaderWindow(QWidget):
         self.text_edit.setProperty('zoomOutFactor', 1.0)
         
         # 设置鼠标光标为箭头形状，避免显示文本光标
-        self.text_edit.setCursor(Qt.ArrowCursor)
+        self.text_edit.setCursor(Qt.ArrowCursor)    
         
         # 禁用滚动条
         self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -526,6 +526,9 @@ class ReaderWindow(QWidget):
         self.hover_to_show = config.get('hover_to_show', False)
         self.key_to_show = config.get('key_to_show', False)
         self.custom_key = config.get('custom_key', 'ctrl')
+        # 读取用户自定义翻页按键（字母键，最多两个）
+        self.page_up_keys = config.get('page_up_keys', [])
+        self.page_down_keys = config.get('page_down_keys', [])
         
         # 更新显示模式（如果不需要恢复位置，则不保持位置）
         self.update_display_mode(preserve_position=self.should_restore_position)
@@ -922,7 +925,18 @@ class ReaderWindow(QWidget):
         if self.config_window is None:
             self.config_window = ConfigWindow(self.config_manager, self)
             self.config_window.config_changed.connect(self.on_config_changed)
-            
+        else:
+            # 每次打开前确保录入状态复位，避免残留“正在录入”提示
+            try:
+                self.config_window.recording_up = False
+                self.config_window.recording_down = False
+                if hasattr(self.config_window, 'page_up_record_btn'):
+                    self.config_window.page_up_record_btn.setText('录入上一页按键')
+                if hasattr(self.config_window, 'page_down_record_btn'):
+                    self.config_window.page_down_record_btn.setText('录入下一页按键')
+            except Exception:
+                pass
+        
         self.config_window.show()
         self.config_window.raise_()
         self.config_window.activateWindow()
@@ -1101,6 +1115,9 @@ class ReaderWindow(QWidget):
         self.hover_to_show = config.get('hover_to_show', False)
         self.key_to_show = config.get('key_to_show', False)
         self.custom_key = config.get('custom_key', 'ctrl')
+        # 自定义翻页按键更新
+        self.page_up_keys = config.get('page_up_keys', [])
+        self.page_down_keys = config.get('page_down_keys', [])
         
         # 根据新配置更新窗口可见性
         # 如果启用了显示控制功能，需要重新评估窗口状态
@@ -1175,8 +1192,8 @@ class ReaderWindow(QWidget):
         # 发出关闭信号
         self.closed.emit()
         
-        # 显示主窗口
-        if self.main_window:
+        # 显示主窗口（仅当不是应用整体退出时）
+        if self.main_window and not getattr(self.main_window, 'exiting', False):
             self.main_window.show_main_window()
             
         event.accept()
@@ -1237,7 +1254,34 @@ class ReaderWindow(QWidget):
         elif event.key() == Qt.Key_PageDown:
             if content_visible_now:
                 self.page_down()
+        # 自定义翻页按键：字母/数字 + 特定单键（space/enter/tab），禁止组合键
         else:
+            # 禁止组合键：仅在无修饰键时才响应自定义翻页按键
+            if event.modifiers() == Qt.NoModifier and content_visible_now:
+                # 先识别特定单键
+                key_token = None
+                if event.key() == Qt.Key_Space:
+                    key_token = 'space'
+                elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                    key_token = 'enter'
+                elif event.key() == Qt.Key_Tab:
+                    key_token = 'tab'
+                else:
+                    # 使用event.text()获取字母或数字
+                    t = event.text().strip().lower()
+                    if len(t) == 1 and (t.isalpha() or t.isdigit()):
+                        key_token = t
+                # 根据用户设置触发翻页
+                if key_token:
+                    if key_token in (self.page_up_keys or []):
+                        self.page_up()
+                        event.accept()
+                        return
+                    if key_token in (self.page_down_keys or []):
+                        self.page_down()
+                        event.accept()
+                        return
+            # 其他按键按原逻辑处理
             super().keyPressEvent(event)
             
     def keyReleaseEvent(self, event):

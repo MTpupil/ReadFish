@@ -56,6 +56,10 @@ class ConfigWindow(QDialog):
         # 文字设置组
         text_group = self.create_text_group()
         main_layout.addWidget(text_group)
+
+        # 翻页按键设置组（新增）
+        nav_group = self.create_navigation_key_group()
+        main_layout.addWidget(nav_group)
         
         # 按钮区域
         button_layout = self.create_button_layout()
@@ -178,6 +182,56 @@ class ConfigWindow(QDialog):
         layout.addRow('文字透明度:', text_opacity_layout)
         
         return group
+
+    def create_navigation_key_group(self):
+        """创建翻页按键设置组
+        - 允许用户通过“按键录入”的方式添加最多两个上一页和两个下一页的按键
+        - 保留默认方向键和PageUp/PageDown翻页功能
+        """
+        group = QGroupBox('翻页按键设置')
+        layout = QFormLayout(group)
+        layout.setSpacing(10)
+
+        # 上一页按键显示与操作
+        up_layout = QHBoxLayout()
+        self.page_up_keys_label = QLabel('未设置')
+        self.page_up_record_btn = QPushButton('录入上一页按键')
+        self.page_up_clear_btn = QPushButton('清除')
+        self.page_up_record_btn.setToolTip('点击后，按下要设置的按键进行录入（支持字母/数字、Space、Enter、Tab；最多两个；不支持组合键和 Ctrl/Alt/Shift/Win）。')
+        self.page_up_clear_btn.setToolTip('清除已设置的上一页按键')
+        self.page_up_record_btn.clicked.connect(self.start_record_up_keys)
+        self.page_up_clear_btn.clicked.connect(self.clear_up_keys)
+        up_layout.addWidget(self.page_up_keys_label)
+        up_layout.addStretch()
+        up_layout.addWidget(self.page_up_record_btn)
+        up_layout.addWidget(self.page_up_clear_btn)
+        layout.addRow('上一页按键:', up_layout)
+
+        # 下一页按键显示与操作
+        down_layout = QHBoxLayout()
+        self.page_down_keys_label = QLabel('未设置')
+        self.page_down_record_btn = QPushButton('录入下一页按键')
+        self.page_down_clear_btn = QPushButton('清除')
+        self.page_down_record_btn.setToolTip('点击后，按下要设置的按键进行录入（支持字母/数字、Space、Enter、Tab；最多两个；不支持组合键和 Ctrl/Alt/Shift/Win）。')
+        self.page_down_clear_btn.setToolTip('清除已设置的下一页按键')
+        self.page_down_record_btn.clicked.connect(self.start_record_down_keys)
+        self.page_down_clear_btn.clicked.connect(self.clear_down_keys)
+        down_layout.addWidget(self.page_down_keys_label)
+        down_layout.addStretch()
+        down_layout.addWidget(self.page_down_record_btn)
+        down_layout.addWidget(self.page_down_clear_btn)
+        layout.addRow('下一页按键:', down_layout)
+
+        # 录入状态标志
+        self.recording_up = False
+        self.recording_down = False
+
+        # 提示信息
+        tip = QLabel('提示：最多设置两个按键（字母/数字或 Space、Enter、Tab）。默认方向键和 PageUp/PageDown 始终可用。')
+        tip.setStyleSheet('color: #7f8c8d;')
+        layout.addRow(tip)
+
+        return group
         
     def create_button_layout(self):
         """创建按钮布局"""
@@ -294,6 +348,12 @@ class ConfigWindow(QDialog):
             text_opacity = int(self.config.get('text_opacity', 1.0) * 100)
             self.text_opacity_slider.setValue(text_opacity)
             self.text_opacity_label.setText(f'{text_opacity}%')
+
+            # 翻页按键设置显示
+            up_keys = self.config.get('page_up_keys', [])
+            down_keys = self.config.get('page_down_keys', [])
+            self.page_up_keys_label.setText(', '.join(up_keys) if up_keys else '未设置')
+            self.page_down_keys_label.setText(', '.join(down_keys) if down_keys else '未设置')
             
         finally:
             # 重新连接信号（宽高输入框现在是只读的，不需要重连信号）
@@ -316,6 +376,8 @@ class ConfigWindow(QDialog):
         self.config['custom_key'] = self.custom_key_combo.currentText()
         self.config['font_size'] = self.font_size_spinbox.value()
         self.config['font_family'] = self.font_family_combo.currentText()
+
+        # 翻页按键配置由录入逻辑直接更新，这里不重复处理
         
         # 立即保存并应用配置
         self.config_manager.save_config(self.config)
@@ -378,6 +440,61 @@ class ConfigWindow(QDialog):
         
     def keyPressEvent(self, event):
         """键盘按键事件处理"""
+        # 如果正在录入翻页按键，捕获字母键并写入配置
+        if self.recording_up or self.recording_down:
+            # 禁止组合键：仅在无修饰键时才允许录入
+            if event.modifiers() != Qt.NoModifier:
+                event.accept()
+                return
+
+            # 将按键映射为可保存的token
+            key_token = None
+            if event.key() == Qt.Key_Space:
+                key_token = 'space'
+            elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                key_token = 'enter'
+            elif event.key() == Qt.Key_Tab:
+                key_token = 'tab'
+            else:
+                # 使用event.text()获取字母或数字
+                text = event.text().strip().lower()
+                if len(text) == 1 and (text.isalpha() or text.isdigit()):
+                    key_token = text
+
+            # 过滤禁止的特殊键
+            if key_token in ('ctrl', 'alt', 'shift', 'win', 'meta', 'command', 'super'):
+                event.accept()
+                return
+
+            # 录入逻辑
+            if key_token:
+                if self.recording_up:
+                    up_keys = self.config.get('page_up_keys', [])
+                    if key_token not in up_keys and len(up_keys) < 2:
+                        up_keys.append(key_token)
+                        self.config['page_up_keys'] = up_keys
+                        self.page_up_keys_label.setText(', '.join(up_keys))
+                        self.config_manager.save_config(self.config)
+                        self.config_changed.emit()
+                    # 成功录入一个按键后，自动结束录入，避免持续显示“正在录入”
+                    self.recording_up = False
+                    self.page_up_record_btn.setText('录入上一页按键')
+                elif self.recording_down:
+                    down_keys = self.config.get('page_down_keys', [])
+                    if key_token not in down_keys and len(down_keys) < 2:
+                        down_keys.append(key_token)
+                        self.config['page_down_keys'] = down_keys
+                        self.page_down_keys_label.setText(', '.join(down_keys))
+                        self.config_manager.save_config(self.config)
+                        self.config_changed.emit()
+                    # 成功录入一个按键后，自动结束录入，避免持续显示“正在录入”
+                    self.recording_down = False
+                    self.page_down_record_btn.setText('录入下一页按键')
+
+            # 正在录入时不向父窗口传递按键事件
+            event.accept()
+            return
+
         # 阻止Ctrl+Q快捷键传递到父窗口，避免意外退出程序
         if event.key() == Qt.Key_Q and event.modifiers() == Qt.ControlModifier:
             # 在配置窗口中忽略Ctrl+Q，不传递给父窗口
@@ -386,8 +503,61 @@ class ConfigWindow(QDialog):
         
         # 其他按键事件正常处理
         super().keyPressEvent(event)
+
+    def start_record_up_keys(self):
+        """开始录入上一页按键"""
+        self.recording_down = False
+        self.page_down_record_btn.setText('录入下一页按键')
+        # 切换录入状态
+        self.recording_up = not self.recording_up
+        self.page_up_record_btn.setText('正在录入...(按一个键后自动完成，可再次点击录入第二个)' if self.recording_up else '录入上一页按键')
+        # 焦点确保按键能被接收
+        self.activateWindow()
+        self.setFocus(Qt.OtherFocusReason)
+
+    def start_record_down_keys(self):
+        """开始录入下一页按键"""
+        self.recording_up = False
+        self.page_up_record_btn.setText('录入上一页按键')
+        # 切换录入状态
+        self.recording_down = not self.recording_down
+        self.page_down_record_btn.setText('正在录入...(按一个键后自动完成，可再次点击录入第二个)' if self.recording_down else '录入下一页按键')
+        # 焦点确保按键能被接收
+        self.activateWindow()
+        self.setFocus(Qt.OtherFocusReason)
+
+    def clear_up_keys(self):
+        """清除上一页按键设置"""
+        self.recording_up = False
+        self.page_up_record_btn.setText('录入上一页按键')
+        self.config['page_up_keys'] = []
+        self.page_up_keys_label.setText('未设置')
+        # 保存配置并通知变更
+        self.config_manager.save_config(self.config)
+        self.config_changed.emit()
+
+    def clear_down_keys(self):
+        """清除下一页按键设置"""
+        self.recording_down = False
+        self.page_down_record_btn.setText('录入下一页按键')
+        self.config['page_down_keys'] = []
+        self.page_down_keys_label.setText('未设置')
+        # 保存配置并通知变更
+        self.config_manager.save_config(self.config)
+        self.config_changed.emit()
     
     def closeEvent(self, event):
         """窗口关闭事件"""
+        # 结束任何录入状态，避免下次打开仍显示“正在录入”
+        try:
+            self.recording_up = False
+            self.recording_down = False
+            # 恢复按钮文本
+            if hasattr(self, 'page_up_record_btn'):
+                self.page_up_record_btn.setText('录入上一页按键')
+            if hasattr(self, 'page_down_record_btn'):
+                self.page_down_record_btn.setText('录入下一页按键')
+        except Exception:
+            pass
         # 配置已自动保存，直接关闭窗口
         event.accept()

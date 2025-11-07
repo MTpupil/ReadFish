@@ -51,6 +51,12 @@ class ConfigManager:
             'hover_to_show': False,  # 鼠标悬停才显示窗口
             'key_to_show': False,  # 需要按住自定义键才显示窗口
             'custom_key': 'ctrl',  # 自定义按键（ctrl, alt, shift, space等）
+
+            # 翻页按键（新增）
+            # 说明：保留默认的方向键和PageUp/PageDown翻页功能，
+            # 此处允许用户额外自定义最多两个上一页和两个下一页的按键（字母键），通过设置页面按键录入。
+            'page_up_keys': [],    # 例如 ["q", "a"]
+            'page_down_keys': []   # 例如 ["w", "s"]
         }
         
         # 当前配置
@@ -199,7 +205,41 @@ class ConfigManager:
         valid_keys = ['ctrl', 'alt', 'shift', 'space', 'tab', 'enter', 'esc']
         if validated.get('custom_key') not in valid_keys:
             validated['custom_key'] = 'ctrl'
-        
+
+        # 验证翻页按键（最多两个，允许字母键 a-z、数字 0-9，以及特定单键：space、enter、tab；禁止 ctrl/alt/shift/win 等全局/功能键及组合键）
+        def normalize_page_keys(keys):
+            """规范化并限制翻页按键列表
+            - 允许：单字符字母/数字，或特定关键词：space、enter、tab
+            - 禁止：ctrl/alt/shift/win/meta/command 以及 f1-f12 等功能键（不在可选列表中）
+            - 转为小写，去重，最多保留2个
+            """
+            allowed_specials = {'space', 'enter', 'tab'}
+            forbidden = {'ctrl', 'alt', 'shift', 'win', 'meta', 'command', 'super'}
+            result = []
+            if isinstance(keys, list):
+                for k in keys:
+                    if not isinstance(k, str):
+                        continue
+                    kk = k.strip().lower()
+                    # 跳过禁止键和空字符串
+                    if not kk or kk in forbidden:
+                        continue
+                    # 允许的特殊键
+                    if kk in allowed_specials:
+                        if kk not in result:
+                            result.append(kk)
+                    # 单字符字母或数字
+                    elif len(kk) == 1 and (kk.isalpha() or kk.isdigit()):
+                        if kk not in result:
+                            result.append(kk)
+                    # 其他值忽略
+                    if len(result) >= 2:
+                        break
+            return result[:2]
+
+        validated['page_up_keys'] = normalize_page_keys(validated.get('page_up_keys', []))
+        validated['page_down_keys'] = normalize_page_keys(validated.get('page_down_keys', []))
+
         return validated
         
     def is_valid_color(self, color_str: str) -> bool:
