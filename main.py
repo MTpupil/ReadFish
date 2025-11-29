@@ -13,20 +13,38 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
     QWidget, QPushButton, QLabel, QFileDialog, QMessageBox,
     QSystemTrayIcon, QMenu, QAction, QListWidget, QListWidgetItem,
-    QInputDialog, QTabWidget, QFrame, QSplitter, QTreeWidget, QTreeWidgetItem
+    QInputDialog, QTabWidget, QFrame, QSplitter, QTreeWidget, QTreeWidgetItem,
+    QScrollArea, QGridLayout, QGraphicsDropShadowEffect, QSizePolicy
 )
 from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QFont, QIcon, QPixmap, QPainter
+from PyQt5.QtGui import QFont, QIcon, QPixmap, QPainter, QFontDatabase, QColor
 
 from reader_window import ReaderWindow
 from config_manager import ConfigManager
 from history_manager import HistoryManager
-from book_item_widget import BookItemWidget
+from book_item_widget import BookItemWidget, BookCardWidget
 from file_utils import detect_encoding_and_read_file, read_file_content
 from resource_path import get_resource_path, find_icon_file
 
+# 现代UI：无边框窗口（可选）
+try:
+    from qframelesswindow import FramelessMainWindow as _BaseMainWindow
+except Exception:
+    _BaseMainWindow = QMainWindow
 
-class MainWindow(QMainWindow):
+# Fluent 组件
+try:
+    from qfluentwidgets import PrimaryPushButton, setTheme, Theme
+except Exception:
+    PrimaryPushButton = QPushButton
+    def setTheme(x):
+        pass
+    class Theme:
+        AUTO = None
+
+
+
+class MainWindow(_BaseMainWindow):
     """主窗口类 - 用于选择文件和启动阅读器"""
     
     def __init__(self):
@@ -59,8 +77,12 @@ class MainWindow(QMainWindow):
         
     def init_ui(self):
         """初始化用户界面"""
-        self.setWindowTitle('ReadFish - 摸个鱼吧')
-        self.setFixedSize(600, 720)  # 增大窗口尺寸以容纳书架功能和公众号信息
+        self.setWindowTitle('ReadFish')
+        self.setFixedSize(1000, 680)
+        try:
+            setTheme(Theme.AUTO)
+        except Exception:
+            pass
         
         # 设置应用程序图标
         # 使用资源路径处理模块来正确获取图标文件路径
@@ -94,41 +116,17 @@ class MainWindow(QMainWindow):
         title_label.setFont(QFont('Microsoft YaHei', 16, QFont.Bold))
         title_label.setStyleSheet('color: #2c3e50; margin-bottom: 10px;')
         
-        # 创建标签页控件
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setStyleSheet(
-            'QTabWidget::pane {'
-            '    border: 1px solid #bdc3c7;'
-            '    border-radius: 6px;'
-            '}'
-            'QTabBar::tab {'
-            '    background-color: #ecf0f1;'
-            '    padding: 8px 16px;'
-            '    margin-right: 2px;'
-            '    border-top-left-radius: 6px;'
-            '    border-top-right-radius: 6px;'
-            '}'
-            'QTabBar::tab:selected {'
-            '    background-color: #3498db;'
-            '    color: white;'
-            '}'
-        )
-        
-        # 创建快速阅读标签页
-        self.quick_read_tab = self.create_quick_read_tab()
-        self.tab_widget.addTab(self.quick_read_tab, '快速阅读')
-        
-        # 创建书架标签页
-        self.bookshelf_tab = self.create_bookshelf_tab()
-        self.tab_widget.addTab(self.bookshelf_tab, '我的书架')
-        
-        # 创建公众号信息区域
-        wechat_info_widget = self.create_wechat_info_widget()
-        
-        # 添加组件到主布局
+        modern_root = self.create_modern_bookshelf_tab()
         main_layout.addWidget(title_label)
-        main_layout.addWidget(self.tab_widget)
-        main_layout.addWidget(wechat_info_widget)
+        main_layout.addWidget(modern_root)
+
+        # 无边框标题栏置顶以支持拖动
+        try:
+            self.titleBar.raise_()
+        except Exception:
+            pass
+        
+        # 公众号区域不再加载，保持简洁现代
         
     def create_quick_read_tab(self):
         """创建快速阅读标签页"""
@@ -501,6 +499,90 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.bookshelf_status_label)
         
         return tab
+
+    def create_modern_bookshelf_tab(self):
+        tab = QWidget()
+        from PyQt5.QtWidgets import QHBoxLayout
+        layout = QHBoxLayout(tab)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        sidebar = QFrame()
+        sidebar.setFixedWidth(160)
+        s_layout = QVBoxLayout(sidebar)
+        s_layout.setContentsMargins(12,12,12,12)
+        s_layout.setSpacing(10)
+        # 拟物风格包裹 + 阴影
+        sidebar.setStyleSheet('QFrame{background:#f7f9fb; border-radius:12px; border:1px solid #e1e8ed;}')
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 3)
+        shadow.setColor(QColor(0,0,0,60))
+        sidebar.setGraphicsEffect(shadow)
+
+        # 上区：书架
+        shelf_label = QLabel('书架')
+        shelf_label.setStyleSheet('color:#7f8c8d; font-weight:bold;')
+        self.shelf_list = QListWidget()
+        self.shelf_list.itemSelectionChanged.connect(self.on_shelf_changed)
+        self.shelf_list.setStyleSheet('QListWidget{border:none; background:transparent;}')
+        s_layout.addWidget(shelf_label)
+        s_layout.addWidget(self.shelf_list)
+        # 下区：设置 / 帮助
+        other_label = QLabel('其他')
+        other_label.setStyleSheet('color:#7f8c8d; font-weight:bold;')
+        self.tools_list = QListWidget()
+        self.tools_list.itemSelectionChanged.connect(self.on_tools_changed)
+        self.tools_list.setStyleSheet('QListWidget{border:none; background:transparent;}')
+        s_layout.addWidget(other_label)
+        s_layout.addWidget(self.tools_list)
+
+        right = QFrame()
+        r_layout = QVBoxLayout(right)
+        r_layout.setContentsMargins(0,0,0,0)
+        r_layout.setSpacing(8)
+        tb = QHBoxLayout()
+        self.import_book_button2 = PrimaryPushButton('导入书籍')
+        self.import_book_button2.clicked.connect(self.import_book)
+        self.refresh_button2 = PrimaryPushButton('刷新书架')
+        self.refresh_button2.clicked.connect(self.refresh_bookshelf)
+        self.open_folder_button2 = PrimaryPushButton('打开书架目录')
+        self.open_folder_button2.clicked.connect(self.open_bookshelf_folder)
+        for b in [self.import_book_button2, self.refresh_button2, self.open_folder_button2]:
+            b.setFixedHeight(32)
+        tb.addWidget(self.import_book_button2)
+        tb.addWidget(self.refresh_button2)
+        tb.addWidget(self.open_folder_button2)
+        tb.addStretch()
+        r_layout.addLayout(tb)
+        self.card_scroll = QScrollArea()
+        self.card_scroll.setWidgetResizable(True)
+        self.card_host = QWidget()
+        self.card_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.card_grid = QGridLayout(self.card_host)
+        self.card_grid.setContentsMargins(10,10,10,10)
+        self.card_grid.setHorizontalSpacing(20)
+        self.card_grid.setVerticalSpacing(20)
+        try:
+            self.card_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        except Exception:
+            pass
+        self.card_scroll.setWidget(self.card_host)
+        r_layout.addWidget(self.card_scroll)
+        self.bookshelf_status_label2 = QLabel('书架为空，请导入书籍')
+        self.bookshelf_status_label2.setAlignment(Qt.AlignCenter)
+        r_layout.addWidget(self.bookshelf_status_label2)
+
+        layout.addWidget(sidebar)
+        layout.addWidget(right, stretch=1)
+
+        self.card_scroll.setAcceptDrops(True)
+        self.card_scroll.installEventFilter(self)
+        self.ensure_groups_structure()
+        self.build_sidebar_sections()
+        self.populate_cards_for_current_category()
+
+        return tab
         
     def init_bookshelf(self):
         """初始化书架系统"""
@@ -616,7 +698,7 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         """事件过滤：支持拖拽导入到书架列表"""
-        if obj is getattr(self, 'book_list', None) or obj is getattr(self, 'book_tree', None):
+        if obj is getattr(self, 'book_list', None) or obj is getattr(self, 'book_tree', None) or obj is getattr(self, 'card_scroll', None):
             from PyQt5.QtCore import QEvent
             from PyQt5.QtGui import QDropEvent
             if event.type() == QEvent.DragEnter or event.type() == QEvent.DragMove:
@@ -635,11 +717,14 @@ class MainWindow(QMainWindow):
                                 self.import_book_file(path)
                     event.acceptProposedAction()
                     return True
+            elif event.type() == QEvent.Resize and obj is getattr(self, 'card_scroll', None):
+                self.populate_cards_for_current_category()
         return super().eventFilter(obj, event)
             
     def refresh_bookshelf(self):
         """刷新书架显示（树形分组）"""
-        self.book_tree.clear()
+        self.book_tree.clear() if hasattr(self, 'book_tree') else None
+        self.clear_card_grid() if hasattr(self, 'card_grid') else None
         
         # 检查并清理不存在的文件记录
         books_to_remove = []
@@ -657,15 +742,26 @@ class MainWindow(QMainWindow):
             self.save_bookshelf_data()
         
         if not self.books_data:
-            self.bookshelf_status_label.setText('书架为空，请导入书籍')
-            self.bookshelf_status_label.show()
+            if hasattr(self, 'bookshelf_status_label'):
+                self.bookshelf_status_label.setText('书架为空，请导入书籍')
+                self.bookshelf_status_label.show()
+            if hasattr(self, 'bookshelf_status_label2'):
+                self.bookshelf_status_label2.setText('书架为空，请导入书籍')
+                self.bookshelf_status_label2.show()
             return
             
-        self.bookshelf_status_label.hide()
+        if hasattr(self, 'bookshelf_status_label'):
+            self.bookshelf_status_label.hide()
+        if hasattr(self, 'bookshelf_status_label2'):
+            self.bookshelf_status_label2.hide()
         
         # 分组树构建
         self.ensure_groups_structure()
-        self.build_tree_view()
+        if hasattr(self, 'book_tree'):
+            self.build_tree_view()
+        if hasattr(self, 'shelf_list'):
+            self.build_sidebar_sections()
+            self.populate_cards_for_current_category()
 
     def build_default_groups(self):
         """根据当前书籍构建默认分组结构"""
@@ -716,6 +812,115 @@ class MainWindow(QMainWindow):
         for i, child in enumerate(self.groups_data.get('children', [])):
             add_group(root, child, [i])
         self.book_tree.expandAll()
+
+    def build_sidebar_sections(self):
+        # 上区
+        self.shelf_list.clear()
+        all_item = QListWidgetItem('全部')
+        all_item.setData(Qt.UserRole, {'type': 'all'})
+        self.shelf_list.addItem(all_item)
+        for idx, group in enumerate(self.groups_data.get('children', [])):
+            # 不显示“未分组”
+            if group.get('name') == '未分组':
+                continue
+            it = QListWidgetItem(group.get('name', f'分组{idx+1}'))
+            it.setData(Qt.UserRole, {'type': 'group', 'index': idx})
+            self.shelf_list.addItem(it)
+        self.shelf_list.setCurrentRow(0)
+        # 下区
+        self.tools_list.clear()
+        settings_item = QListWidgetItem('设置')
+        settings_item.setData(Qt.UserRole, {'type': 'settings'})
+        help_item = QListWidgetItem('帮助')
+        help_item.setData(Qt.UserRole, {'type': 'help'})
+        self.tools_list.addItem(settings_item)
+        self.tools_list.addItem(help_item)
+
+    def clear_card_grid(self):
+        if not hasattr(self, 'card_grid'):
+            return
+        while self.card_grid.count():
+            item = self.card_grid.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
+
+    def populate_cards_for_current_category(self):
+        if not hasattr(self, 'card_grid'):
+            return
+        self.clear_card_grid()
+        if self.shelf_list.currentItem() is None:
+            return
+        data = self.shelf_list.currentItem().data(Qt.UserRole)
+        names = []
+        if data.get('type') == 'all':
+            names = list(self.books_data.keys())
+        elif data.get('type') == 'group':
+            idx = data.get('index', 0)
+            names = self.groups_data.get('children', [])[idx].get('books', [])
+        vw =  self.card_scroll.viewport().width() if hasattr(self.card_scroll, 'viewport') else 600
+        card_w = 150
+        gap = self.card_grid.horizontalSpacing() or 20
+        cols = max(1, min(8, vw // (card_w + gap)))
+        # 设置列拉伸，留出右侧空白以保证左对齐
+        for i in range(cols):
+            self.card_grid.setColumnStretch(i, 0)
+        self.card_grid.setColumnStretch(cols, 1)
+        row = 0
+        col = 0
+        for name in names:
+            info = self.books_data.get(name)
+            if not info:
+                continue
+            info_with_name = info.copy()
+            info_with_name['name'] = name
+            card = BookCardWidget(name, info_with_name)
+            card.continue_reading.connect(self.continue_reading_from_shelf)
+            card.start_reading.connect(self.start_reading_from_shelf)
+            card.rename_book.connect(self.rename_book_from_widget)
+            card.delete_book.connect(self.delete_book_from_widget)
+            card.show_contents.connect(self.show_book_contents)
+            self.card_grid.addWidget(card, row, col)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+
+    def on_shelf_changed(self):
+        self.populate_cards_for_current_category()
+
+    def on_tools_changed(self):
+        item = self.tools_list.currentItem()
+        if not item:
+            return
+        data = item.data(Qt.UserRole)
+        t = data.get('type')
+        if t == 'settings':
+            self.open_settings()
+        elif t == 'help':
+            self.show_help()
+
+    def open_settings(self):
+        try:
+            from config_window import ConfigWindow
+            self._config_window = getattr(self, '_config_window', None)
+            if self._config_window is None:
+                self._config_window = ConfigWindow(self.config_manager, self)
+                self._config_window.config_changed.connect(lambda: self.refresh_bookshelf())
+            self._config_window.show()
+            self._config_window.raise_()
+            self._config_window.activateWindow()
+        except Exception as e:
+            QMessageBox.critical(self, '错误', f'打开设置失败：{str(e)}')
+
+    def show_help(self):
+        msg = (
+            'ReadFish 书架重构版：\n'
+            ' - 左侧选择分组或功能\n'
+            ' - 右侧双击书籍继续阅读；右键菜单提供所有操作\n'
+            ' - 顶部可导入/刷新/打开书架目录'
+        )
+        QMessageBox.information(self, '帮助', msg)
 
     def read_book_from_tree(self, item, column):
         """树节点双击阅读（叶子节点）"""
@@ -984,7 +1189,8 @@ class MainWindow(QMainWindow):
         """更新继续阅读按钮状态"""
         # 检查是否有历史记录
         has_history = self.history_manager.has_history()
-        self.continue_button.setEnabled(has_history)
+        if hasattr(self, 'continue_button'):
+            self.continue_button.setEnabled(has_history)
         
         if has_history:
             # 获取最后阅读的书籍信息
@@ -1015,17 +1221,22 @@ class MainWindow(QMainWindow):
                 if book_name:
                     # 如果书名太长，截断显示
                     display_name = book_name if len(book_name) <= 20 else book_name[:20] + '...'
-                    self.current_book_label.setText(f'当前阅读：《{display_name}》')
-                    self.current_book_label.setVisible(True)
+                    if hasattr(self, 'current_book_label'):
+                        self.current_book_label.setText(f'当前阅读：《{display_name}》')
+                        self.current_book_label.setVisible(True)
                 else:
-                    self.current_book_label.setVisible(False)
+                    if hasattr(self, 'current_book_label'):
+                        self.current_book_label.setVisible(False)
             else:
-                self.current_book_label.setVisible(False)
+                if hasattr(self, 'current_book_label'):
+                    self.current_book_label.setVisible(False)
         else:
-            self.current_book_label.setVisible(False)
+            if hasattr(self, 'current_book_label'):
+                self.current_book_label.setVisible(False)
             
         # 继续阅读按钮始终显示固定文本
-        self.continue_button.setText('继续阅读')
+        if hasattr(self, 'continue_button'):
+            self.continue_button.setText('继续阅读')
         
     def continue_reading(self):
         """继续阅读上次的文件"""
@@ -1485,6 +1696,8 @@ def main():
     # 设置应用程序在最后一个窗口关闭时不自动退出
     # 这样即使所有窗口都隐藏了，程序也会继续运行（通过托盘图标维持）
     app.setQuitOnLastWindowClosed(False)
+
+    # 统一使用 Fluent 主题，避免 qt_material 资源路径兼容问题
     
     # 创建主窗口
     window = MainWindow()

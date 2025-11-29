@@ -6,10 +6,10 @@
 
 import os
 from PyQt5.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QPushButton, QSizePolicy
+    QWidget, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint
+from PyQt5.QtGui import QFont, QPainter, QColor, QPen, QLinearGradient, QBrush
 
 
 class BookItemWidget(QWidget):
@@ -128,3 +128,74 @@ class BookItemWidget(QWidget):
         self.book_name = book_name
         self.book_info = book_info
         self.name_label.setText(book_name)
+
+
+class BookCardWidget(QWidget):
+    continue_reading = pyqtSignal(dict)
+    start_reading = pyqtSignal(dict)
+    rename_book = pyqtSignal(dict)
+    delete_book = pyqtSignal(dict)
+    show_contents = pyqtSignal(dict)
+
+    def __init__(self, book_name, book_info, parent=None):
+        super().__init__(parent)
+        self.book_name = book_name
+        self.book_info = book_info
+        self.setFixedSize(150, 190)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        self.title = QLabel(self.elide_text(book_name))
+        self.title.setAlignment(Qt.AlignCenter)
+        self.title.setWordWrap(True)
+        self.title.setStyleSheet('color:#2c3e50;')
+        layout.addWidget(self.title)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_menu)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    def elide_text(self, text, max_len=20):
+        return text if len(text) <= max_len else text[:max_len] + '...'
+
+    def mouseDoubleClickEvent(self, event):
+        self.continue_reading.emit(self.book_info)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self.rect()
+        shadow = QColor(0, 0, 0, 40)
+        p.setPen(Qt.NoPen)
+        p.setBrush(shadow)
+        p.drawRoundedRect(r.adjusted(4, 4, -4, -4), 10, 10)
+        cover_rect = r.adjusted(18, 18, -18, -60)
+        p.setBrush(QColor(46, 134, 193))
+        p.setPen(QPen(QColor(33, 97, 140), 2))
+        p.drawRoundedRect(cover_rect, 6, 6)
+        p.end()
+
+    def show_menu(self, pos):
+        from PyQt5.QtWidgets import QMenu, QAction
+        menu = QMenu(self)
+        a1 = QAction('继续阅读', self)
+        a1.triggered.connect(lambda: self.continue_reading.emit(self.book_info))
+        menu.addAction(a1)
+        a2 = QAction('从头阅读', self)
+        a2.triggered.connect(lambda: self.start_reading.emit(self.book_info))
+        menu.addAction(a2)
+        menu.addSeparator()
+        a3 = QAction('重命名', self)
+        a3.triggered.connect(lambda: self.rename_book.emit(self.book_info))
+        menu.addAction(a3)
+        a4 = QAction('删除', self)
+        a4.triggered.connect(lambda: self.delete_book.emit(self.book_info))
+        menu.addAction(a4)
+        a5 = QAction('显示目录', self)
+        a5.triggered.connect(lambda: self.show_contents.emit(self.book_info))
+        menu.addAction(a5)
+        menu.exec_(self.mapToGlobal(pos))
+
+    def update_book_info(self, book_name, book_info):
+        self.book_name = book_name
+        self.book_info = book_info
+        self.title.setText(self.elide_text(book_name))
