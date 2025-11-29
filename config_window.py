@@ -30,7 +30,7 @@ class ConfigWindow(QDialog):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle('ReadFish - 设置')
-        self.setFixedSize(450, 600)
+        self.setFixedSize(480, 720)
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
         
         # 设置窗口图标
@@ -57,6 +57,10 @@ class ConfigWindow(QDialog):
         text_group = self.create_text_group()
         main_layout.addWidget(text_group)
 
+        # 光标设置组（新增）
+        cursor_group = self.create_cursor_group()
+        main_layout.addWidget(cursor_group)
+
         # 翻页按键设置组（新增）
         nav_group = self.create_navigation_key_group()
         main_layout.addWidget(nav_group)
@@ -71,23 +75,31 @@ class ConfigWindow(QDialog):
         layout = QFormLayout(group)
         layout.setSpacing(10)
         
-        # 窗口宽度（只读显示）
+        # 窗口宽度/高度（只读显示）- 同一行
         self.width_spinbox = QSpinBox()
-        self.width_spinbox.setRange(35, 1920)  # 设置最小宽度为35像素
+        self.width_spinbox.setRange(35, 1920)
         self.width_spinbox.setSuffix(' px')
         self.width_spinbox.setToolTip('当前窗口宽度（只读，请使用四角标记调节大小）')
-        self.width_spinbox.setReadOnly(True)  # 设置为只读
-        self.width_spinbox.setEnabled(False)  # 禁用输入
-        layout.addRow('窗口宽度:', self.width_spinbox)
-        
-        # 窗口高度设置（只读显示）
+        self.width_spinbox.setReadOnly(True)
+        self.width_spinbox.setEnabled(False)
+
         self.height_spinbox = QSpinBox()
-        self.height_spinbox.setRange(35, 1080)  # 设置最小高度为35像素
+        self.height_spinbox.setRange(35, 1080)
         self.height_spinbox.setSuffix(' px')
         self.height_spinbox.setToolTip('当前窗口高度（只读，请使用四角标记调节大小）')
-        self.height_spinbox.setReadOnly(True)  # 设置为只读
-        self.height_spinbox.setEnabled(False)  # 禁用输入
-        layout.addRow('窗口高度:', self.height_spinbox)
+        self.height_spinbox.setReadOnly(True)
+        self.height_spinbox.setEnabled(False)
+
+        size_row_widget = QFrame()
+        size_row_layout = QHBoxLayout(size_row_widget)
+        size_row_layout.setContentsMargins(0, 0, 0, 0)
+        size_row_layout.addWidget(QLabel('宽度:'))
+        size_row_layout.addWidget(self.width_spinbox)
+        size_row_layout.addSpacing(12)
+        size_row_layout.addWidget(QLabel('高度:'))
+        size_row_layout.addWidget(self.height_spinbox)
+        size_row_layout.addStretch()
+        layout.addRow('窗口尺寸:', size_row_widget)
         
         # 单行模式
         self.single_line_checkbox = QCheckBox()
@@ -110,19 +122,25 @@ class ConfigWindow(QDialog):
         self.hover_to_show_checkbox.stateChanged.connect(self.on_config_changed)
         layout.addRow('自动隐藏:', self.hover_to_show_checkbox)
         
-        # 按键显示控制
+        # 按键显示控制（与自定义按键下拉框同一行，且仅在开启时可操作）
         self.key_to_show_checkbox = QCheckBox()
         self.key_to_show_checkbox.setText('需要按键')
         self.key_to_show_checkbox.setToolTip('启用后，需要按住指定按键并且鼠标悬停才显示窗口')
         self.key_to_show_checkbox.stateChanged.connect(self.on_config_changed)
-        layout.addRow('按键隐藏:', self.key_to_show_checkbox)
-        
-        # 自定义按键选择
+
         self.custom_key_combo = QComboBox()
         self.custom_key_combo.addItems(['ctrl', 'alt', 'shift'])
         self.custom_key_combo.setToolTip('选择需要按住的自定义按键')
         self.custom_key_combo.currentTextChanged.connect(self.on_config_changed)
-        layout.addRow('自定义按键:', self.custom_key_combo)
+
+        key_row_widget = QFrame()
+        key_row_layout = QHBoxLayout(key_row_widget)
+        key_row_layout.setContentsMargins(0, 0, 0, 0)
+        key_row_layout.addWidget(self.key_to_show_checkbox)
+        key_row_layout.addSpacing(12)
+        key_row_layout.addWidget(self.custom_key_combo)
+        key_row_layout.addStretch()
+        layout.addRow('按键隐藏:', key_row_widget)
         
         # 移除窗口透明度设置，因为已固定为极低透明度以避免鼠标穿透
         
@@ -134,27 +152,29 @@ class ConfigWindow(QDialog):
         layout = QFormLayout(group)
         layout.setSpacing(10)
         
-        # 字体大小
+        # 字体大小与类型（同一行）
         self.font_size_spinbox = QSpinBox()
-        self.font_size_spinbox.setRange(1, 72)  # 允许更小的字体大小
+        self.font_size_spinbox.setRange(1, 72)
         self.font_size_spinbox.setSuffix(' pt')
         self.font_size_spinbox.valueChanged.connect(self.on_config_changed)
-        layout.addRow('字体大小:', self.font_size_spinbox)
-        
-        # 字体类型
+
         self.font_family_combo = QComboBox()
         self.font_family_combo.addItems([
-            'Microsoft YaHei',
-            'SimSun',
-            'SimHei',
-            'KaiTi',
-            'FangSong',
-            'Arial',
-            'Times New Roman',
-            'Courier New'
+            'Microsoft YaHei', 'SimSun', 'SimHei', 'KaiTi', 'FangSong',
+            'Arial', 'Times New Roman', 'Courier New'
         ])
         self.font_family_combo.currentTextChanged.connect(self.on_config_changed)
-        layout.addRow('字体类型:', self.font_family_combo)
+
+        font_row_widget = QFrame()
+        font_row_layout = QHBoxLayout(font_row_widget)
+        font_row_layout.setContentsMargins(0, 0, 0, 0)
+        font_row_layout.addWidget(QLabel('大小:'))
+        font_row_layout.addWidget(self.font_size_spinbox)
+        font_row_layout.addSpacing(12)
+        font_row_layout.addWidget(QLabel('类型:'))
+        font_row_layout.addWidget(self.font_family_combo)
+        font_row_layout.addStretch()
+        layout.addRow('字体:', font_row_widget)
         
         # 文字颜色
         color_layout = QHBoxLayout()
@@ -181,6 +201,48 @@ class ConfigWindow(QDialog):
         text_opacity_layout.addWidget(self.text_opacity_label)
         layout.addRow('文字透明度:', text_opacity_layout)
         
+        return group
+
+    def create_cursor_group(self):
+        group = QGroupBox('光标设置')
+        layout = QFormLayout(group)
+        layout.setSpacing(10)
+
+        # 圆点大小（滑块，1-16px）
+        dot_size_row = QFrame()
+        dot_size_layout = QHBoxLayout(dot_size_row)
+        dot_size_layout.setContentsMargins(0, 0, 0, 0)
+        self.dot_size_slider = QSlider(Qt.Horizontal)
+        self.dot_size_slider.setRange(1, 16)
+        self.dot_size_slider.valueChanged.connect(self.on_dot_size_changed)
+        self.dot_size_value_label = QLabel('2 px')
+        self.dot_size_value_label.setMinimumWidth(40)
+        dot_size_layout.addWidget(self.dot_size_slider)
+        dot_size_layout.addWidget(self.dot_size_value_label)
+        layout.addRow('圆点大小:', dot_size_row)
+
+        # 圆点颜色
+        dot_color_layout = QHBoxLayout()
+        self.dot_color_button = QPushButton()
+        self.dot_color_button.setFixedSize(60, 30)
+        self.dot_color_button.clicked.connect(self.choose_dot_color)
+        self.dot_color_label = QLabel('#000000')
+        dot_color_layout.addWidget(self.dot_color_button)
+        dot_color_layout.addWidget(self.dot_color_label)
+        dot_color_layout.addStretch()
+        layout.addRow('圆点颜色:', dot_color_layout)
+
+        # 圆点透明度
+        dot_opacity_layout = QHBoxLayout()
+        self.dot_opacity_slider = QSlider(Qt.Horizontal)
+        self.dot_opacity_slider.setRange(10, 100)
+        self.dot_opacity_slider.valueChanged.connect(self.on_dot_opacity_changed)
+        self.dot_opacity_label = QLabel('100%')
+        self.dot_opacity_label.setMinimumWidth(40)
+        dot_opacity_layout.addWidget(self.dot_opacity_slider)
+        dot_opacity_layout.addWidget(self.dot_opacity_label)
+        layout.addRow('圆点透明度:', dot_opacity_layout)
+
         return group
 
     def create_navigation_key_group(self):
@@ -307,6 +369,12 @@ class ConfigWindow(QDialog):
         self.font_size_spinbox.valueChanged.disconnect()
         self.font_family_combo.currentTextChanged.disconnect()
         self.text_opacity_slider.valueChanged.disconnect()
+        # 新增：光标组控件断开信号
+        try:
+            self.dot_size_slider.valueChanged.disconnect()
+            self.dot_opacity_slider.valueChanged.disconnect()
+        except Exception:
+            pass
         
         try:
             # 窗口设置
@@ -349,6 +417,19 @@ class ConfigWindow(QDialog):
             self.text_opacity_slider.setValue(text_opacity)
             self.text_opacity_label.setText(f'{text_opacity}%')
 
+            # 自定义按键使能状态由“按键隐藏”控制
+            self.custom_key_combo.setEnabled(self.key_to_show_checkbox.isChecked())
+
+            # 光标设置
+            self.dot_size_slider.setValue(self.config.get('dot_cursor_size', 2))
+            self.dot_size_value_label.setText(f"{self.config.get('dot_cursor_size', 2)} px")
+            dot_color = self.config.get('dot_cursor_color', '#000000')
+            self.update_dot_color_button(dot_color)
+            self.dot_color_label.setText(dot_color)
+            dot_opacity = int(self.config.get('dot_cursor_opacity', 1.0) * 100)
+            self.dot_opacity_slider.setValue(dot_opacity)
+            self.dot_opacity_label.setText(f'{dot_opacity}%')
+
             # 翻页按键设置显示
             up_keys = self.config.get('page_up_keys', [])
             down_keys = self.config.get('page_down_keys', [])
@@ -365,6 +446,11 @@ class ConfigWindow(QDialog):
             self.font_size_spinbox.valueChanged.connect(self.on_config_changed)
             self.font_family_combo.currentTextChanged.connect(self.on_config_changed)
             self.text_opacity_slider.valueChanged.connect(self.on_text_opacity_changed)
+            # 新增：光标组控件重连信号
+            if hasattr(self, 'dot_size_slider'):
+                self.dot_size_slider.valueChanged.connect(self.on_dot_size_changed)
+            if hasattr(self, 'dot_opacity_slider'):
+                self.dot_opacity_slider.valueChanged.connect(self.on_dot_opacity_changed)
         
     def on_config_changed(self):
         """配置改变时更新内部配置并立即应用"""
@@ -376,6 +462,10 @@ class ConfigWindow(QDialog):
         self.config['custom_key'] = self.custom_key_combo.currentText()
         self.config['font_size'] = self.font_size_spinbox.value()
         self.config['font_family'] = self.font_family_combo.currentText()
+
+        # 控制自定义按键下拉框使能状态：仅在“按键隐藏”开启时可操作
+        self.custom_key_combo.setEnabled(self.key_to_show_checkbox.isChecked())
+        # 光标设置（大小由滑块处理）
 
         # 翻页按键配置由录入逻辑直接更新，这里不重复处理
         
@@ -393,6 +483,40 @@ class ConfigWindow(QDialog):
         # 立即保存并应用配置
         self.config_manager.save_config(self.config)
         self.config_changed.emit()
+
+    def on_dot_opacity_changed(self, value):
+        self.config['dot_cursor_opacity'] = value / 100.0
+        self.dot_opacity_label.setText(f'{value}%')
+        self.config_manager.save_config(self.config)
+        self.config_changed.emit()
+
+    def on_dot_size_changed(self, value):
+        self.config['dot_cursor_size'] = value
+        self.dot_size_value_label.setText(f'{value} px')
+        self.config_manager.save_config(self.config)
+        self.config_changed.emit()
+
+    def choose_dot_color(self):
+        current_color = QColor(self.config.get('dot_cursor_color', '#000000'))
+        color = QColorDialog.getColor(current_color, self, '选择圆点颜色')
+        if color.isValid():
+            color_hex = color.name()
+            self.config['dot_cursor_color'] = color_hex
+            self.update_dot_color_button(color_hex)
+            self.dot_color_label.setText(color_hex)
+            self.config_manager.save_config(self.config)
+            self.config_changed.emit()
+
+    def update_dot_color_button(self, color_hex):
+        self.dot_color_button.setStyleSheet(
+            f'QPushButton {{'
+            f'    background-color: {color_hex};'
+            f'    border: 1px solid #bdc3c7;'
+            f'    border-radius: 4px;'
+            f'}}'
+        )
+
+    # 删除旧的 on_cursor_config_changed（改为滑块专用处理）
         
     def choose_color(self):
         """选择文字颜色"""

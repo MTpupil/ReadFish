@@ -57,6 +57,11 @@ class ConfigManager:
             # 此处允许用户额外自定义最多两个上一页和两个下一页的按键（字母键），通过设置页面按键录入。
             'page_up_keys': [],    # 例如 ["q", "a"]
             'page_down_keys': []   # 例如 ["w", "s"]
+            ,
+            # 光标设置（新增）
+            'dot_cursor_size': 2,           # 圆点直径（像素）
+            'dot_cursor_color': '#000000',  # 圆点颜色（十六进制）
+            'dot_cursor_opacity': 1.0       # 圆点透明度 (0.1 - 1.0)
         }
         
         # 当前配置
@@ -178,6 +183,8 @@ class ConfigManager:
         # 验证透明度值
         validated['window_opacity'] = max(0.1, min(1.0, validated.get('window_opacity', 0.9)))
         validated['text_opacity'] = max(0.1, min(1.0, validated.get('text_opacity', 1.0)))
+        # 验证圆点透明度
+        validated['dot_cursor_opacity'] = max(0.1, min(1.0, validated.get('dot_cursor_opacity', 1.0)))
         
         # 验证字体大小
         validated['font_size'] = max(1, min(72, validated.get('font_size', 12)))  # 允许更小的字体大小
@@ -194,6 +201,10 @@ class ConfigManager:
         font_color = validated.get('font_color', '#000000')
         if not self.is_valid_color(font_color):
             validated['font_color'] = '#000000'
+        # 验证圆点颜色
+        dot_color = validated.get('dot_cursor_color', '#000000')
+        if not self.is_valid_color(dot_color):
+            validated['dot_cursor_color'] = '#000000'
             
         # 验证布尔值
         validated['stay_on_top'] = bool(validated.get('stay_on_top', True))
@@ -205,6 +216,10 @@ class ConfigManager:
         valid_keys = ['ctrl', 'alt', 'shift', 'space', 'tab', 'enter', 'esc']
         if validated.get('custom_key') not in valid_keys:
             validated['custom_key'] = 'ctrl'
+
+        # 验证圆点大小（像素范围约束）
+        size = int(validated.get('dot_cursor_size', 2))
+        validated['dot_cursor_size'] = max(1, min(16, size))
 
         # 验证翻页按键（最多两个，允许字母键 a-z、数字 0-9，以及特定单键：space、enter、tab；禁止 ctrl/alt/shift/win 等全局/功能键及组合键）
         def normalize_page_keys(keys):

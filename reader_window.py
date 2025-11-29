@@ -26,7 +26,7 @@ class NoZoomTextEdit(QTextEdit):
         # 不调用父类的wheelEvent，完全忽略滚轮事件
         event.ignore()
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QEvent, QRect, QTimer
-from PyQt5.QtGui import QFont, QColor, QPalette, QPainter, QPen
+from PyQt5.QtGui import QFont, QColor, QPalette, QPainter, QPen, QCursor, QPixmap
 import ctypes
 from ctypes import wintypes
 import os
@@ -170,12 +170,23 @@ class ReaderWindow(QWidget):
         
         # 为主窗口也设置箭头光标
         self.setCursor(Qt.ArrowCursor)
+
+        # 创建“小圆点”鼠标光标（用于自动隐藏显示时）
+        cfg = self.config_manager.get_config()
+        self.dot_cursor = self.create_dot_cursor(
+            diameter=cfg.get('dot_cursor_size', 2),
+            color_hex=cfg.get('dot_cursor_color', '#000000'),
+            opacity=cfg.get('dot_cursor_opacity', 1.0)
+        )
+        self.use_dot_cursor = False
         
         # 设置窗口焦点策略，确保能够接收键盘输入
         self.setFocusPolicy(Qt.StrongFocus)
         
         # 安装事件过滤器，让文本编辑器的鼠标事件传递给父窗口
         self.text_edit.installEventFilter(self)
+        self.text_edit.viewport().installEventFilter(self)
+        self.text_edit.viewport().setCursor(Qt.ArrowCursor)
         
         frame_layout.addWidget(self.text_edit)
         layout.addWidget(self.background_frame)
@@ -532,6 +543,11 @@ class ReaderWindow(QWidget):
         
         # 更新显示模式（如果不需要恢复位置，则不保持位置）
         self.update_display_mode(preserve_position=self.should_restore_position)
+        # 刷新圆点光标设置，确保后续可见性更新采用最新光标样式
+        self.refresh_dot_cursor_from_config()
+
+        # 刷新圆点光标设置
+        self.refresh_dot_cursor_from_config()
         
         # 根据配置更新窗口可见性
         # 如果启用了显示控制功能，初始状态应该是隐藏的
@@ -539,6 +555,8 @@ class ReaderWindow(QWidget):
             self.content_visible = True  # 设置为True以便update_content_visibility能正确切换状态
             self.is_mouse_over = False  # 初始鼠标不在窗口上
             self.is_key_pressed = False  # 初始按键未按下
+        # 刷新圆点光标设置并更新窗口可见性
+        self.refresh_dot_cursor_from_config()
         self.update_content_visibility()
         
     def apply_text_config(self, config=None):
@@ -615,6 +633,65 @@ class ReaderWindow(QWidget):
         
         # 重写鼠标事件处理以确保整个窗口区域都能响应
         self.installEventFilter(self)
+
+    def create_dot_cursor(self, diameter=2, color_hex='#000000', opacity=1.0):
+        """创建一个小圆点形状的自定义鼠标光标
+
+        作者: MTpupil
+        时间: 2025-11-29
+        功能: 生成一个透明背景，仅在中心绘制直径为 `diameter` 像素的小圆点的光标。
+        适用场景: 自动隐藏（悬停显示/按键显示）模式下，窗口显示时将鼠标替换为不干扰阅读的极简光标。
+        依赖条件: PyQt5 已安装，可在 Windows 10/11 专业版上使用。
+        风险提示: 自定义光标会覆盖组件原有光标；当需要精确指示（如调整窗口大小）时，圆点光标可能不够直观。
+        """
+        size = 16
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        color = QColor(color_hex)
+        color.setAlphaF(max(0.1, min(1.0, opacity)))
+        pen = QPen(color)
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.setBrush(color)
+        cx = size // 2
+        cy = size // 2
+        d = max(1, min(16, int(diameter)))
+        r = max(1, d // 2)
+        painter.drawEllipse(cx - r, cy - r, d, d)
+        painter.end()
+        # 热点设置为圆心，便于定位
+        return QCursor(pm, cx, cy)
+
+    def refresh_dot_cursor_from_config(self):
+        cfg = self.config_manager.get_config()
+        self.dot_cursor = self.create_dot_cursor(
+            diameter=cfg.get('dot_cursor_size', 2),
+            color_hex=cfg.get('dot_cursor_color', '#000000'),
+            opacity=cfg.get('dot_cursor_opacity', 1.0)
+        )
+        if self.use_dot_cursor:
+            self.apply_cursor_style(use_dot=True)
+
+    def apply_cursor_style(self, use_dot):
+        """根据标志应用圆点或箭头光标到相关组件
+
+        作者: MTpupil
+        时间: 2025-11-29
+        功能: 将光标统一设置到窗口、文本编辑器和背景框架，确保无文本插入光标出现。
+        """
+        self.use_dot_cursor = bool(use_dot)
+        cursor_obj = self.dot_cursor if self.use_dot_cursor else Qt.ArrowCursor
+        try:
+            self.setCursor(cursor_obj)
+            if hasattr(self, 'text_edit') and self.text_edit:
+                self.text_edit.setCursor(cursor_obj)
+                self.text_edit.viewport().setCursor(cursor_obj)
+            if hasattr(self, 'background_frame') and self.background_frame:
+                self.background_frame.setCursor(cursor_obj)
+        except Exception:
+            pass
         
     def update_content_visibility(self):
         """根据配置和当前状态更新窗口可见性"""
@@ -653,6 +730,9 @@ class ReaderWindow(QWidget):
             should_show = self.is_key_pressed
         # 如果都没启用，默认显示
             
+        # 在显示控制模式下，窗口处于显示状态时切换为小圆点光标
+        self.apply_cursor_style(use_dot=(should_show and (self.hover_to_show or self.key_to_show)))
+
         # 更新窗口可见性
         if should_show != self.content_visible:
             self.content_visible = should_show
@@ -669,6 +749,8 @@ class ReaderWindow(QWidget):
                 self.setFocus(Qt.OtherFocusReason)
             else:
                 self.hide()  # 隐藏整个窗口
+                # 隐藏时恢复箭头光标
+                self.apply_cursor_style(use_dot=False)
                 
     def check_key_state(self):
         """检查自定义按键是否被按下"""
@@ -776,22 +858,19 @@ class ReaderWindow(QWidget):
                 event.accept()
         else:
             # 更新鼠标光标
-            config = self.config_manager.get_config()
-            if config.get('show_resize_handles', False):
-                resize_direction = self.get_resize_direction(event.pos())
-                if resize_direction:
-                    if resize_direction in ['top_left', 'bottom_right']:
-                        self.setCursor(Qt.SizeFDiagCursor)
-                    elif resize_direction in ['top_right', 'bottom_left']:
-                        self.setCursor(Qt.SizeBDiagCursor)
+            if not self.use_dot_cursor:
+                config = self.config_manager.get_config()
+                if config.get('show_resize_handles', False):
+                    resize_direction = self.get_resize_direction(event.pos())
+                    if resize_direction:
+                        if resize_direction in ['top_left', 'bottom_right']:
+                            self.setCursor(Qt.SizeFDiagCursor)
+                        elif resize_direction in ['top_right', 'bottom_left']:
+                            self.setCursor(Qt.SizeBDiagCursor)
+                    else:
+                        self.apply_cursor_style(use_dot=False)
                 else:
-                    self.setCursor(Qt.ArrowCursor)
-                    # 确保文本编辑器也显示箭头光标
-                    self.text_edit.setCursor(Qt.ArrowCursor)
-            else:
-                self.setCursor(Qt.ArrowCursor)
-                # 确保文本编辑器也显示箭头光标
-                self.text_edit.setCursor(Qt.ArrowCursor)
+                    self.apply_cursor_style(use_dot=False)
         # 确保事件不会传递给子控件
         event.accept()
             
@@ -816,7 +895,7 @@ class ReaderWindow(QWidget):
         text_edit = getattr(self, 'text_edit', None)
         background_frame = getattr(self, 'background_frame', None)
         
-        if obj == text_edit or obj == background_frame:
+        if obj == text_edit or obj == background_frame or (text_edit and obj == text_edit.viewport()):
             if event.type() == QEvent.MouseButtonPress:
                 # 将鼠标按下事件传递给父窗口
                 self.mousePressEvent(event)
@@ -839,7 +918,7 @@ class ReaderWindow(QWidget):
                 self.is_mouse_over = False
                 self.update_content_visibility()
                 return True
-            elif event.type() == QEvent.Wheel and obj == text_edit:
+            elif event.type() == QEvent.Wheel and (obj == text_edit or (text_edit and obj == text_edit.viewport())):
                 # 完全拦截文本编辑器的所有滚轮事件，防止任何字体调节
                 # 无论是否按下修饰键，都将滚轮事件传递给父窗口处理翻页功能
                 self.wheelEvent(event)
@@ -1127,6 +1206,8 @@ class ReaderWindow(QWidget):
             # 检查按键状态（如果启用了按键显示功能）
             if self.key_to_show:
                 self.is_key_pressed = self.check_key_state()
+        # 刷新圆点光标设置并立即应用（可见时更新样式）
+        self.refresh_dot_cursor_from_config()
         self.update_content_visibility()
         
         # 更新四角标记显示
