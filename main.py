@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
     QWidget, QPushButton, QLabel, QFileDialog, QMessageBox,
     QSystemTrayIcon, QMenu, QAction, QListWidget, QListWidgetItem,
-    QInputDialog, QTabWidget, QFrame, QSplitter
+    QInputDialog, QTabWidget, QFrame, QSplitter, QTreeWidget, QTreeWidgetItem
 )
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QPainter
@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
         self.book_folder = os.path.join(appdata_dir, 'book')
         self.bookshelf_data_file = os.path.join(appdata_dir, 'bookshelf.json')
         self.books_data = {}
+        self.groups_data = None  # 书籍分组（嵌套虚拟分组）
         
         # 初始化书架系统
         self.init_bookshelf()
@@ -422,13 +423,37 @@ class MainWindow(QMainWindow):
         )
         self.refresh_button.clicked.connect(self.refresh_bookshelf)
         
+        # 打开书架目录按钮（Windows上打开 %APPDATA%\ReadFish\book）
+        self.open_folder_button = QPushButton('打开书架目录')
+        self.open_folder_button.setFixedHeight(35)
+        self.open_folder_button.setStyleSheet(
+            'QPushButton {'
+            '    background-color: #2ecc71; '
+            '    color: white; '
+            '    border: none; '
+            '    border-radius: 6px; '
+            '    font-size: 13px; '
+            '    font-weight: bold; '
+            '    padding: 0 15px;'
+            '}'
+            'QPushButton:hover {'
+            '    background-color: #27ae60;'
+            '}'
+            'QPushButton:pressed {'
+            '    background-color: #1e8449;'
+            '}'
+        )
+        self.open_folder_button.clicked.connect(self.open_bookshelf_folder)
+
         button_layout.addWidget(self.import_book_button)
         button_layout.addWidget(self.refresh_button)
+        button_layout.addWidget(self.open_folder_button)
         button_layout.addStretch()
         
-        # 书籍列表
-        self.book_list = QListWidget()
-        self.book_list.setStyleSheet(
+        # 书架树（支持分组嵌套）
+        self.book_tree = QTreeWidget()
+        self.book_tree.setHeaderHidden(True)
+        self.book_tree.setStyleSheet(
             'QListWidget {'
             '    border: 1px solid #bdc3c7;'
             '    border-radius: 6px;'
@@ -453,9 +478,13 @@ class MainWindow(QMainWindow):
             '    color: white;'
             '}'
         )
-        self.book_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.book_list.customContextMenuRequested.connect(self.show_book_context_menu)
-        self.book_list.itemDoubleClicked.connect(self.read_book_from_shelf)
+        # 树右键菜单与双击阅读
+        self.book_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.book_tree.customContextMenuRequested.connect(self.show_book_context_menu_tree)
+        self.book_tree.itemDoubleClicked.connect(self.read_book_from_tree)
+        # 启用拖拽导入
+        self.book_tree.setAcceptDrops(True)
+        self.book_tree.installEventFilter(self)
         
         # 书架状态标签
         self.bookshelf_status_label = QLabel('书架为空，请导入书籍')
@@ -468,7 +497,7 @@ class MainWindow(QMainWindow):
         
         # 添加组件到布局
         layout.addLayout(button_layout)
-        layout.addWidget(self.book_list)
+        layout.addWidget(self.book_tree)
         layout.addWidget(self.bookshelf_status_label)
         
         return tab
@@ -481,24 +510,48 @@ class MainWindow(QMainWindow):
             
         # 加载书架数据
         self.load_bookshelf_data()
+        # 确保分组结构存在
+        self.ensure_groups_structure()
+
+    def open_bookshelf_folder(self):
+        """打开书架所在的文件夹"""
+        try:
+            if os.path.exists(self.book_folder):
+                os.startfile(self.book_folder)
+            else:
+                QMessageBox.warning(self, '提示', '书架目录不存在！')
+        except Exception as e:
+            QMessageBox.critical(self, '错误', f'无法打开书架目录：{str(e)}')
         
     def load_bookshelf_data(self):
         """加载书架数据"""
         if os.path.exists(self.bookshelf_data_file):
             try:
                 with open(self.bookshelf_data_file, 'r', encoding='utf-8') as f:
-                    self.books_data = json.load(f)
+                    data = json.load(f)
+                # 兼容老格式（仅书籍映射）或新格式（包含分组）
+                if isinstance(data, dict) and 'books' in data and 'groups' in data:
+                    self.books_data = data.get('books', {})
+                    self.groups_data = data.get('groups', None)
+                else:
+                    self.books_data = data if isinstance(data, dict) else {}
+                    self.groups_data = None
             except Exception as e:
                 self.books_data = {}
                 QMessageBox.warning(self, '警告', f'加载书架数据失败：{str(e)}')
         else:
             self.books_data = {}
+            self.groups_data = None
             
     def save_bookshelf_data(self):
         """保存书架数据"""
         try:
+            payload = {
+                'books': self.books_data,
+                'groups': self.groups_data if self.groups_data else self.build_default_groups()
+            }
             with open(self.bookshelf_data_file, 'w', encoding='utf-8') as f:
-                json.dump(self.books_data, f, ensure_ascii=False, indent=2)
+                json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception as e:
             QMessageBox.critical(self, '错误', f'保存书架数据失败：{str(e)}')
             
@@ -514,42 +567,40 @@ class MainWindow(QMainWindow):
         if not file_path:
             return
             
+        self.import_book_file(file_path)
+
+    def import_book_file(self, file_path):
+        """从指定路径导入书籍文件（支持TXT/EPUB），复用现有导入逻辑"""
+        if not file_path:
+            return
         try:
-            # 获取文件名（不含路径）
             file_name = os.path.basename(file_path)
-            book_name = os.path.splitext(file_name)[0]  # 去掉扩展名作为默认书名
-            
+            book_name = os.path.splitext(file_name)[0]
             # 询问用户是否要自定义书名
             custom_name, ok = QInputDialog.getText(
-                self, 
-                '设置书名', 
+                self,
+                '设置书名',
                 f'请输入书名（默认：{book_name}）：',
                 text=book_name
             )
-            
             if ok and custom_name.strip():
                 book_name = custom_name.strip()
-                
-            # 检查书名是否已存在
+            # 冲突处理
             if book_name in self.books_data:
                 reply = QMessageBox.question(
-                    self, 
-                    '书名冲突', 
+                    self,
+                    '书名冲突',
                     f'书架中已存在名为"{book_name}"的书籍，是否覆盖？',
                     QMessageBox.Yes | QMessageBox.No
                 )
                 if reply != QMessageBox.Yes:
                     return
-                    
-            # 生成唯一的文件名（使用时间戳避免冲突）
+            # 生成唯一目标文件
             import time
             timestamp = str(int(time.time()))
             target_filename = f"{timestamp}_{file_name}"
             target_path = os.path.join(self.book_folder, target_filename)
-            
-            # 复制文件到book文件夹
             shutil.copy2(file_path, target_path)
-            
             # 保存书籍信息
             self.books_data[book_name] = {
                 'file_path': target_path,
@@ -557,19 +608,38 @@ class MainWindow(QMainWindow):
                 'import_time': timestamp,
                 'display_name': book_name
             }
-            
-            # 保存数据并刷新显示
             self.save_bookshelf_data()
             self.refresh_bookshelf()
-            
             QMessageBox.information(self, '成功', f'书籍"{book_name}"已成功导入书架！')
-            
         except Exception as e:
             QMessageBox.critical(self, '错误', f'导入书籍失败：{str(e)}')
+
+    def eventFilter(self, obj, event):
+        """事件过滤：支持拖拽导入到书架列表"""
+        if obj is getattr(self, 'book_list', None) or obj is getattr(self, 'book_tree', None):
+            from PyQt5.QtCore import QEvent
+            from PyQt5.QtGui import QDropEvent
+            if event.type() == QEvent.DragEnter or event.type() == QEvent.DragMove:
+                mime = event.mimeData()
+                if mime.hasUrls():
+                    event.acceptProposedAction()
+                    return True
+            elif event.type() == QEvent.Drop:
+                mime = event.mimeData()
+                if mime.hasUrls():
+                    for url in mime.urls():
+                        path = url.toLocalFile()
+                        if path and os.path.isfile(path):
+                            ext = os.path.splitext(path)[1].lower()
+                            if ext in ['.txt', '.epub']:
+                                self.import_book_file(path)
+                    event.acceptProposedAction()
+                    return True
+        return super().eventFilter(obj, event)
             
     def refresh_bookshelf(self):
-        """刷新书架显示"""
-        self.book_list.clear()
+        """刷新书架显示（树形分组）"""
+        self.book_tree.clear()
         
         # 检查并清理不存在的文件记录
         books_to_remove = []
@@ -593,29 +663,190 @@ class MainWindow(QMainWindow):
             
         self.bookshelf_status_label.hide()
         
-        # 添加书籍到列表
-        for book_name, book_info in self.books_data.items():
-            # 创建列表项
-            item = QListWidgetItem()
-            # 确保book_info包含name字段
-            book_info_with_name = book_info.copy()
-            book_info_with_name['name'] = book_name
-            item.setData(Qt.UserRole, book_info_with_name)  # 存储书籍信息
-            
-            # 创建自定义组件
-            book_widget = BookItemWidget(book_name, book_info_with_name)
-            
-            # 连接信号
-            book_widget.continue_reading.connect(self.continue_reading_from_shelf)
-            book_widget.start_reading.connect(self.start_reading_from_shelf)
-            book_widget.rename_book.connect(self.rename_book_from_widget)
-            book_widget.delete_book.connect(self.delete_book_from_widget)
-            book_widget.show_contents.connect(self.show_book_contents)
-            
-            # 添加到列表
-            self.book_list.addItem(item)
-            item.setSizeHint(book_widget.sizeHint())
-            self.book_list.setItemWidget(item, book_widget)
+        # 分组树构建
+        self.ensure_groups_structure()
+        self.build_tree_view()
+
+    def build_default_groups(self):
+        """根据当前书籍构建默认分组结构"""
+        return {
+            'name': 'root',
+            'children': [
+                {
+                    'name': '未分组',
+                    'children': [],
+                    'books': list(self.books_data.keys())
+                }
+            ]
+        }
+
+    def ensure_groups_structure(self):
+        """确保分组结构存在（兼容旧数据）"""
+        if not self.groups_data:
+            self.groups_data = self.build_default_groups()
+
+    def build_tree_view(self):
+        """根据分组数据构建树形视图"""
+        self.book_tree.clear()
+        def add_group(parent_item, group_node, path):
+            group_item = QTreeWidgetItem(parent_item, [group_node['name']])
+            group_item.setData(0, Qt.UserRole, {'type': 'group', 'path': path})
+            # 添加书籍子项
+            for book_name in group_node.get('books', []):
+                info = self.books_data.get(book_name)
+                if not info:
+                    continue
+                leaf = QTreeWidgetItem(group_item)
+                book_info_with_name = info.copy()
+                book_info_with_name['name'] = book_name
+                leaf.setData(0, Qt.UserRole, book_info_with_name)
+                widget = BookItemWidget(book_name, book_info_with_name)
+                widget.continue_reading.connect(self.continue_reading_from_shelf)
+                widget.start_reading.connect(self.start_reading_from_shelf)
+                widget.rename_book.connect(self.rename_book_from_widget)
+                widget.delete_book.connect(self.delete_book_from_widget)
+                widget.show_contents.connect(self.show_book_contents)
+                self.book_tree.setItemWidget(leaf, 0, widget)
+            # 递归子分组
+            for idx, child in enumerate(group_node.get('children', [])):
+                add_group(group_item, child, path + [idx])
+        # 根
+        root = QTreeWidgetItem(self.book_tree, ['书架'])
+        root.setData(0, Qt.UserRole, {'type': 'root'})
+        for i, child in enumerate(self.groups_data.get('children', [])):
+            add_group(root, child, [i])
+        self.book_tree.expandAll()
+
+    def read_book_from_tree(self, item, column):
+        """树节点双击阅读（叶子节点）"""
+        data = item.data(0, Qt.UserRole)
+        if isinstance(data, dict) and 'file_path' in data:
+            file_path = data['file_path']
+            if not os.path.exists(file_path):
+                QMessageBox.warning(self, '警告', '书籍文件不存在，可能已被删除！')
+                return
+            self.selected_file = file_path
+            self.start_reading()
+
+    def show_book_context_menu_tree(self, position):
+        """树形书架右键菜单：支持分组与书籍"""
+        item = self.book_tree.itemAt(position)
+        if not item:
+            return
+        data = item.data(0, Qt.UserRole)
+        menu = QMenu(self)
+        if isinstance(data, dict) and data.get('type') == 'group':
+            # 分组操作
+            add_group_action = QAction('新建子分组', self)
+            add_group_action.triggered.connect(lambda: self.create_subgroup_at(data.get('path', [])))
+            menu.addAction(add_group_action)
+            rename_group_action = QAction('重命名分组', self)
+            rename_group_action.triggered.connect(lambda: self.rename_group_at(data.get('path', [])))
+            menu.addAction(rename_group_action)
+            delete_group_action = QAction('删除分组', self)
+            delete_group_action.triggered.connect(lambda: self.delete_group_at(data.get('path', [])))
+            menu.addAction(delete_group_action)
+        else:
+            # 书籍操作
+            read_action = QAction('阅读', self)
+            read_action.triggered.connect(lambda: self.read_book_from_tree(item, 0))
+            menu.addAction(read_action)
+            menu.addSeparator()
+            rename_action = QAction('重命名', self)
+            rename_action.triggered.connect(lambda: self.rename_book_tree(item))
+            menu.addAction(rename_action)
+            delete_action = QAction('删除', self)
+            delete_action.triggered.connect(lambda: self.delete_book_tree(item))
+            menu.addAction(delete_action)
+        menu.exec_(self.book_tree.mapToGlobal(position))
+
+    def get_group_node(self, path):
+        """根据路径获取分组节点"""
+        node = self.groups_data
+        for idx in path:
+            node = node['children'][idx]
+        return node
+
+    def create_subgroup_at(self, path):
+        name, ok = QInputDialog.getText(self, '新建子分组', '请输入分组名称：')
+        if ok and name.strip():
+            node = self.get_group_node(path)
+            node.setdefault('children', []).append({'name': name.strip(), 'children': [], 'books': []})
+            self.save_bookshelf_data()
+            self.refresh_bookshelf()
+
+    def rename_group_at(self, path):
+        node = self.get_group_node(path)
+        name, ok = QInputDialog.getText(self, '重命名分组', '请输入新的分组名称：', text=node.get('name', ''))
+        if ok and name.strip():
+            node['name'] = name.strip()
+            self.save_bookshelf_data()
+            self.refresh_bookshelf()
+
+    def delete_group_at(self, path):
+        if not path:
+            QMessageBox.warning(self, '警告', '根分组不可删除！')
+            return
+        parent = self.get_group_node(path[:-1])
+        idx = path[-1]
+        # 删除分组前，将书籍移动到“未分组”
+        moving = parent['children'][idx].get('books', [])
+        ungroup = self.groups_data['children'][0]  # 默认“未分组”
+        ungroup['books'].extend(moving)
+        del parent['children'][idx]
+        self.save_bookshelf_data()
+        self.refresh_bookshelf()
+
+    def rename_book_tree(self, item):
+        info = item.data(0, Qt.UserRole)
+        old_name = info.get('name', '')
+        new_name, ok = QInputDialog.getText(self, '重命名书籍', '请输入新的书籍名称：', text=old_name)
+        if ok and new_name.strip() and new_name.strip() != old_name:
+            new_name = new_name.strip()
+            if new_name in self.books_data:
+                QMessageBox.warning(self, '警告', '该书籍名称已存在！')
+                return
+            book_data = self.books_data.pop(old_name)
+            book_data['name'] = new_name
+            self.books_data[new_name] = book_data
+            # 更新分组中的引用
+            def replace_name(node):
+                node['books'] = [new_name if n == old_name else n for n in node.get('books', [])]
+                for c in node.get('children', []):
+                    replace_name(c)
+            replace_name(self.groups_data)
+            self.save_bookshelf_data()
+            self.refresh_bookshelf()
+
+    def delete_book_tree(self, item):
+        info = item.data(0, Qt.UserRole)
+        book_name = info.get('name', '')
+        file_path = info.get('file_path', '')
+        reply = QMessageBox.question(
+            self, '确认删除', f'确定要删除书籍《{book_name}》吗？\n\n注意：这将同时删除书架记录和文件！',
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            try:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                if book_name in self.books_data:
+                    del self.books_data[book_name]
+                # 从分组删除引用
+                def remove_name(node):
+                    node['books'] = [n for n in node.get('books', []) if n != book_name]
+                    for c in node.get('children', []):
+                        remove_name(c)
+                remove_name(self.groups_data)
+                # 历史
+                if file_path:
+                    self.history_manager.remove_book(file_path)
+                self.save_bookshelf_data()
+                self.refresh_bookshelf()
+                self.update_continue_button_state()
+                QMessageBox.information(self, '成功', f'书籍《{book_name}》已删除！')
+            except Exception as e:
+                QMessageBox.critical(self, '错误', f'删除书籍失败：{str(e)}')
             
     def show_book_context_menu(self, position):
         """显示书籍右键菜单"""
