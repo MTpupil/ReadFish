@@ -16,13 +16,14 @@ from PyQt5.QtWidgets import (
     QInputDialog, QTabWidget, QFrame, QSplitter, QTreeWidget, QTreeWidgetItem,
     QScrollArea, QGridLayout, QGraphicsDropShadowEffect, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QPainter, QFontDatabase, QColor
 
 from reader_window import ReaderWindow
 from config_manager import ConfigManager
 from history_manager import HistoryManager
 from book_item_widget import BookItemWidget, BookCardWidget
+from book_item_widget import FolderCardWidget
 from file_utils import detect_encoding_and_read_file, read_file_content
 from resource_path import get_resource_path, find_icon_file
 
@@ -34,13 +35,18 @@ except Exception:
 
 # Fluent 组件
 try:
-    from qfluentwidgets import PrimaryPushButton, setTheme, Theme
+    from qfluentwidgets import PrimaryPushButton, setTheme, Theme, SwitchButton
 except Exception:
     PrimaryPushButton = QPushButton
     def setTheme(x):
         pass
     class Theme:
         AUTO = None
+    class SwitchButton(QPushButton):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.setCheckable(True)
+            self.checkedChanged = self.toggled
 
 
 
@@ -548,12 +554,26 @@ class MainWindow(_BaseMainWindow):
         self.refresh_button2.clicked.connect(self.refresh_bookshelf)
         self.open_folder_button2 = PrimaryPushButton('打开书架目录')
         self.open_folder_button2.clicked.connect(self.open_bookshelf_folder)
-        for b in [self.import_book_button2, self.refresh_button2, self.open_folder_button2]:
+        self.select_switch = SwitchButton()
+        self.select_switch.checkedChanged.connect(self.toggle_selection_mode)
+        try:
+            self.select_switch.setOnText('开')
+            self.select_switch.setOffText('关')
+        except Exception:
+            pass
+        # 移除批量移动/删除与数量显示，保持界面简洁
+        self.back_button = PrimaryPushButton('返回')
+        self.back_button.clicked.connect(self.back_to_all)
+        self.back_button.setFixedHeight(32)
+        self.back_button.setVisible(False)
+        for b in [self.import_book_button2, self.refresh_button2, self.open_folder_button2, self.back_button]:
             b.setFixedHeight(32)
         tb.addWidget(self.import_book_button2)
         tb.addWidget(self.refresh_button2)
         tb.addWidget(self.open_folder_button2)
+        tb.addWidget(self.back_button)
         tb.addStretch()
+        tb.addWidget(self.select_switch)
         r_layout.addLayout(tb)
         self.card_scroll = QScrollArea()
         self.card_scroll.setWidgetResizable(True)
@@ -568,6 +588,16 @@ class MainWindow(_BaseMainWindow):
         except Exception:
             pass
         self.card_scroll.setWidget(self.card_host)
+        self.card_host.setAcceptDrops(True)
+        self.card_host.installEventFilter(self)
+        try:
+            self.card_scroll.viewport().setAcceptDrops(True)
+            self.card_scroll.viewport().installEventFilter(self)
+        except Exception:
+            pass
+        # 右侧空白区创建分组菜单
+        self.card_host.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.card_host.customContextMenuRequested.connect(self.show_card_area_menu)
         r_layout.addWidget(self.card_scroll)
         self.bookshelf_status_label2 = QLabel('书架为空，请导入书籍')
         self.bookshelf_status_label2.setAlignment(Qt.AlignCenter)
@@ -581,6 +611,11 @@ class MainWindow(_BaseMainWindow):
         self.ensure_groups_structure()
         self.build_sidebar_sections()
         self.populate_cards_for_current_category()
+        self.selected_books = set()
+        try:
+            QTimer.singleShot(0, self.populate_cards_for_current_category)
+        except Exception:
+            pass
 
         return tab
         
@@ -698,16 +733,40 @@ class MainWindow(_BaseMainWindow):
 
     def eventFilter(self, obj, event):
         """事件过滤：支持拖拽导入到书架列表"""
-        if obj is getattr(self, 'book_list', None) or obj is getattr(self, 'book_tree', None) or obj is getattr(self, 'card_scroll', None):
+        vp = self.card_scroll.viewport() if hasattr(self, 'card_scroll') else None
+        if obj is getattr(self, 'book_list', None) or obj is getattr(self, 'book_tree', None) or obj is getattr(self, 'card_scroll', None) or obj is getattr(self, 'shelf_list', None) or obj is getattr(self, 'card_host', None) or (vp is not None and obj is vp):
             from PyQt5.QtCore import QEvent
             from PyQt5.QtGui import QDropEvent
             if event.type() == QEvent.DragEnter or event.type() == QEvent.DragMove:
                 mime = event.mimeData()
-                if mime.hasUrls():
-                    event.acceptProposedAction()
+                if mime.hasUrls() or (mime.hasText() and mime.text().startswith('book:')):
+                    event.setDropAction(Qt.MoveAction)
+                    event.accept()
+                    # 排序功能关闭：不更新指示，不重排
                     return True
             elif event.type() == QEvent.Drop:
                 mime = event.mimeData()
+                if (obj is getattr(self, 'card_host', None) or (vp is not None and obj is vp)) and mime.hasText() and mime.text().startswith('book:'):
+                    # 排序功能关闭：仅清理拖拽状态
+                    self.clear_drop_indicator()
+                    self._drag_src_name = None
+                    event.setDropAction(Qt.MoveAction)
+                    event.accept()
+                    return True
+                if obj is getattr(self, 'shelf_list', None) and mime.hasText() and mime.text().startswith('book:'):
+                    book_name = mime.text()[5:]
+                    item = self.shelf_list.currentItem()
+                    if item:
+                        data = item.data(Qt.UserRole)
+                        if data.get('type') == 'group':
+                            gi = data.get('index')
+                            self.move_book_to_group(book_name, gi)
+                            self.clean_empty_groups()
+                            self.save_bookshelf_data()
+                            self.refresh_bookshelf()
+                    event.setDropAction(Qt.MoveAction)
+                    event.accept()
+                    return True
                 if mime.hasUrls():
                     for url in mime.urls():
                         path = url.toLocalFile()
@@ -715,11 +774,209 @@ class MainWindow(_BaseMainWindow):
                             ext = os.path.splitext(path)[1].lower()
                             if ext in ['.txt', '.epub']:
                                 self.import_book_file(path)
-                    event.acceptProposedAction()
+                    event.setDropAction(Qt.MoveAction)
+                    event.accept()
                     return True
+            elif event.type() == QEvent.DragLeave and (vp is not None and obj is vp):
+                self.clear_drop_indicator()
             elif event.type() == QEvent.Resize and obj is getattr(self, 'card_scroll', None):
                 self.populate_cards_for_current_category()
         return super().eventFilter(obj, event)
+
+    def toggle_selection_mode(self, checked):
+        self.selection_mode = bool(checked)
+        self.selected_books = set()
+        if hasattr(self, 'card_grid'):
+            for i in range(self.card_grid.count()):
+                w = self.card_grid.itemAt(i).widget()
+                if w and hasattr(w, 'set_selection_mode'):
+                    w.set_selection_mode(checked)
+
+    def on_card_selection_changed(self, name, selected):
+        if selected:
+            self.selected_books.add(name)
+        else:
+            self.selected_books.discard(name)
+        # 选择状态无需显示数量/按钮
+
+    def show_card_area_menu(self, pos):
+        from PyQt5.QtWidgets import QMenu, QAction, QInputDialog
+        global_pos = self.card_host.mapToGlobal(pos)
+        menu = QMenu(self)
+        create_action = QAction('新建分组', self)
+        def do_create():
+            name, ok = QInputDialog.getText(self, '新建分组', '输入分组名称：')
+            if ok and name.strip():
+                n = name.strip()
+                if self.find_group_index_by_name(n) is not None:
+                    QMessageBox.warning(self, '提示', '分组名称已存在，请使用其他名称')
+                    return
+                self.groups_data.setdefault('children', []).append({'name': n, 'children': [], 'books': []})
+                self.save_bookshelf_data()
+                self.refresh_bookshelf()
+        create_action.triggered.connect(do_create)
+        menu.addAction(create_action)
+        menu.exec_(global_pos)
+
+    def list_group_names(self):
+        names = []
+        children = self.groups_data.get('children', [])
+        if children:
+            names.append('全部')  # 对应未分组
+        for g in children:
+            if g.get('name') != '未分组':
+                names.append(g.get('name'))
+        return names
+
+    def find_group_index_by_name(self, name):
+        if name == '全部':
+            return 0
+        for i, g in enumerate(self.groups_data.get('children', [])):
+            if g.get('name') == name:
+                return i
+        return None
+
+    def remove_book_from_all_groups(self, book_name):
+        for g in self.groups_data.get('children', []):
+            g['books'] = [n for n in g.get('books', []) if n != book_name]
+
+    def move_book_to_group(self, book_name, group_index, before_name=None):
+        self.remove_book_from_all_groups(book_name)
+        target = self.groups_data['children'][group_index]
+        lst = target.setdefault('books', [])
+        if before_name and before_name in lst:
+            idx = lst.index(before_name)
+            lst.insert(idx, book_name)
+        else:
+            lst.append(book_name)
+
+    def move_book_dialog(self, book_info):
+        names = self.list_group_names()
+        if not names:
+            QMessageBox.information(self, '提示', '尚未创建分组')
+            return
+        target, ok = QInputDialog.getItem(self, '移动到分组', '选择目标分组：', names, 0, False)
+        if ok and target:
+            gi = self.find_group_index_by_name(target)
+            if gi is not None:
+                self.move_book_to_group(book_info['name'], gi)
+                self.clean_empty_groups()
+                self.save_bookshelf_data()
+                self.refresh_bookshelf()
+
+    def bulk_move_selected(self):
+        if not getattr(self, 'selected_books', None):
+            return
+        names = self.list_group_names()
+        target, ok = QInputDialog.getItem(self, '批量移动', '选择目标分组：', names, 0, False)
+        if ok and target:
+            gi = self.find_group_index_by_name(target)
+            if gi is not None:
+                for n in list(self.selected_books):
+                    self.move_book_to_group(n, gi)
+                self.clean_empty_groups()
+                self.save_bookshelf_data()
+                self.refresh_bookshelf()
+                self.selected_books = set()
+                self.toggle_selection_mode(False)
+
+    def bulk_delete_selected(self):
+        if not getattr(self, 'selected_books', None):
+            return
+        reply = QMessageBox.question(self, '确认删除', f'确定删除选中的 {len(self.selected_books)} 本书籍吗？', QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        for name in list(self.selected_books):
+            info = self.books_data.get(name)
+            if not info:
+                continue
+            fp = info.get('file_path')
+            try:
+                if fp and os.path.exists(fp):
+                    os.remove(fp)
+            except Exception:
+                pass
+            self.books_data.pop(name, None)
+        # 从分组移除
+        for g in self.groups_data.get('children', []):
+            g['books'] = [n for n in g.get('books', []) if n not in self.selected_books]
+        self.clean_empty_groups()
+        self.save_bookshelf_data()
+        self.refresh_bookshelf()
+        self.selected_books = set()
+        self.toggle_selection_mode(False)
+
+    def handle_drop_group_create(self, src_name, target_name):
+        # 解析停留时间，用于决定是否创建分组
+        hold_ms = 0
+        if '|' in src_name:
+            parts = src_name.split('|')
+            src_name = parts[0]
+            try:
+                hold_ms = int(parts[1])
+            except Exception:
+                hold_ms = 0
+        src_group = None
+        tgt_group = None
+        for i, g in enumerate(self.groups_data.get('children', [])):
+            lst = g.get('books', [])
+            if src_name in lst:
+                src_group = i
+            if target_name in lst:
+                tgt_group = i
+        if src_group is not None and tgt_group is not None and src_group == tgt_group:
+            lst = self.groups_data['children'][src_group]['books']
+            if src_name in lst and target_name in lst:
+                if hold_ms >= 400:
+                    # 长停留，创建分组
+                    pass
+                else:
+                    # 短停留，同分组内排序
+                    lst.remove(src_name)
+                    idx = lst.index(target_name)
+                    lst.insert(idx, src_name)
+                    self.save_bookshelf_data()
+                    self.refresh_bookshelf()
+                    return
+        # 创建新分组并移动两本书（使用“未命名分组N”命名方案）
+        new_name = self.next_unnamed_group_name()
+        self.groups_data.setdefault('children', []).append({'name': new_name, 'children': [], 'books': []})
+        gi = len(self.groups_data['children']) - 1
+        self.move_book_to_group(src_name, gi)
+        self.move_book_to_group(target_name, gi, before_name=src_name)
+        self.clean_empty_groups()
+        self.save_bookshelf_data()
+        self.refresh_bookshelf()
+        
+    def next_unnamed_group_name(self):
+        names = [g.get('name', '') for g in self.groups_data.get('children', [])]
+        base = '未命名分组'
+        max_n = 0
+        for n in names:
+            if n.startswith(base):
+                try:
+                    num = int(n[len(base):])
+                    if num > max_n:
+                        max_n = num
+                except Exception:
+                    pass
+        return f"{base}{max_n + 1}"
+
+    def clean_empty_groups(self):
+        children = self.groups_data.get('children', [])
+        if not children:
+            return
+        new_children = []
+        for i, g in enumerate(children):
+            if i == 0:
+                new_children.append(g)
+                continue
+            books_empty = len(g.get('books', [])) == 0
+            children_empty = len(g.get('children', [])) == 0
+            if books_empty and children_empty:
+                continue
+            new_children.append(g)
+        self.groups_data['children'] = new_children
             
     def refresh_bookshelf(self):
         """刷新书架显示（树形分组）"""
@@ -843,51 +1100,332 @@ class MainWindow(_BaseMainWindow):
             item = self.card_grid.takeAt(0)
             w = item.widget()
             if w:
-                w.setParent(None)
+                try:
+                    self.card_grid.removeWidget(w)
+                except Exception:
+                    pass
+                try:
+                    w.hide()
+                except Exception:
+                    pass
+                try:
+                    w.deleteLater()
+                except Exception:
+                    pass
 
     def populate_cards_for_current_category(self):
         if not hasattr(self, 'card_grid'):
             return
         self.clear_card_grid()
+        self._current_card_widgets = {}
         if self.shelf_list.currentItem() is None:
             return
         data = self.shelf_list.currentItem().data(Qt.UserRole)
         names = []
+        group_nodes = self.groups_data.get('children', [])
         if data.get('type') == 'all':
-            names = list(self.books_data.keys())
+            names = group_nodes[0].get('books', []) if group_nodes else list(self.books_data.keys())
+            show_groups = [(i, g) for i, g in enumerate(group_nodes) if g.get('name') != '未分组']
+            self._current_group_index = 0 if group_nodes and isinstance(group_nodes, list) and len(group_nodes) > 0 else None
+            self._in_all_view = True
         elif data.get('type') == 'group':
             idx = data.get('index', 0)
-            names = self.groups_data.get('children', [])[idx].get('books', [])
+            if idx < 0 or idx >= len(self.groups_data.get('children', [])):
+                self.shelf_list.setCurrentRow(0)
+                data = self.shelf_list.currentItem().data(Qt.UserRole)
+                names = group_nodes[0].get('books', []) if group_nodes else list(self.books_data.keys())
+                show_groups = [(i, g) for i, g in enumerate(group_nodes) if g.get('name') != '未分组']
+                self._current_group_index = 0 if group_nodes else None
+                self._in_all_view = True
+            else:
+                names = self.groups_data.get('children', [])[idx].get('books', [])
+                show_groups = []
+                self._current_group_index = idx
+                self._in_all_view = False
+        self._current_names = list(names)
         vw =  self.card_scroll.viewport().width() if hasattr(self.card_scroll, 'viewport') else 600
-        card_w = 150
+        card_w = 130
         gap = self.card_grid.horizontalSpacing() or 20
         cols = max(1, min(8, vw // (card_w + gap)))
         # 设置列拉伸，留出右侧空白以保证左对齐
-        for i in range(cols):
+        for i in range(0, 12):
             self.card_grid.setColumnStretch(i, 0)
         self.card_grid.setColumnStretch(cols, 1)
         row = 0
         col = 0
+        # 先加入分组文件夹卡片
+        for gi, g in show_groups:
+            preview = g.get('books', [])[:4]
+            folder = FolderCardWidget(gi, g.get('name', f'分组{gi+1}'), preview_books=preview)
+            folder.open_group.connect(self.on_group_open)
+            folder.rename_group.connect(self.rename_group_by_index)
+            folder.delete_group.connect(self.delete_group_by_index)
+            folder.drop_book_to_group.connect(self.on_drop_book_to_group)
+            self.card_grid.addWidget(folder, row, col)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
         for name in names:
             info = self.books_data.get(name)
             if not info:
                 continue
+            if getattr(self, '_dragging', False) and name == getattr(self, '_drag_src_name', None):
+                continue
             info_with_name = info.copy()
             info_with_name['name'] = name
             card = BookCardWidget(name, info_with_name)
+            card.setAcceptDrops(True)
             card.continue_reading.connect(self.continue_reading_from_shelf)
             card.start_reading.connect(self.start_reading_from_shelf)
             card.rename_book.connect(self.rename_book_from_widget)
             card.delete_book.connect(self.delete_book_from_widget)
             card.show_contents.connect(self.show_book_contents)
+            card.move_book.connect(lambda bi=info_with_name: self.move_book_dialog(bi))
+            card.drop_group_create.connect(self.handle_drop_group_create)
+            card.selection_changed.connect(self.on_card_selection_changed)
+            card.set_selection_mode(getattr(self, 'selection_mode', False))
             self.card_grid.addWidget(card, row, col)
+            self._current_card_widgets[name] = card
             col += 1
             if col >= cols:
                 col = 0
                 row += 1
+        
+
+    def update_drop_indicator(self, obj, pos):
+        return
+
+    def clear_drop_indicator(self):
+        if hasattr(self, '_drop_indicator') and self._drop_indicator:
+            self._drop_indicator.hide()
+        if hasattr(self, '_placeholder_widget') and self._placeholder_widget:
+            try:
+                self._placeholder_widget.setParent(None)
+            except Exception:
+                pass
+            self._placeholder_widget = None
+        self._drag_src_name = None
+        # 拖拽阶段不重排，仅清除指示即可
+
+    def apply_drop_reorder(self, src_name):
+        return
+
+    def compute_insert_index(self, x, y):
+        try:
+            vw = self.card_scroll.viewport().width() if hasattr(self.card_scroll, 'viewport') else 600
+            card_w = 130
+            gap = self.card_grid.horizontalSpacing() or 20
+            cols = max(1, min(8, vw // (card_w + gap)))
+            # 收集当前卡片位置（跳过源卡片）
+            items = []
+            for name in self._current_names:
+                if getattr(self, '_dragging', False) and name == getattr(self, '_drag_src_name', None):
+                    continue
+                w = self._current_card_widgets.get(name)
+                if not w:
+                    continue
+                r = w.geometry()  # relative to card_host
+                items.append((name, r))
+            # 按行列排序
+            items.sort(key=lambda t: (t[1].top(), t[1].left()))
+            if not items:
+                return 0, cols
+            # 找到所在行
+            row_starts = []
+            cur_top = None
+            for idx, (_, r) in enumerate(items):
+                if cur_top is None or abs(r.top() - cur_top) > 5:
+                    cur_top = r.top()
+                    row_starts.append((len(row_starts), idx, r.top()))
+            # 确定p所在行（落点y与行top比较）；若在某行上方，插入该行起始；下方则最后
+            target_row = 0
+            for ridx, start_idx, top in row_starts:
+                if y <= top + 210:
+                    target_row = ridx
+                    break
+                target_row = ridx
+            # 行范围索引
+            start = row_starts[target_row][1]
+            end = row_starts[target_row + 1][1] if target_row + 1 < len(row_starts) else len(items)
+            # 在行内按x决定插入位置：第一个center.x()大于x的位置
+            insert = start
+            for i in range(start, end):
+                cx = items[i][1].center().x()
+                if x <= cx:
+                    insert = i
+                    break
+                insert = i + 1
+            try:
+                print(f"[DND] compute_insert row={target_row} range=({start},{end}) x={x} -> insert={insert}")
+            except Exception:
+                pass
+            return insert, cols
+        except Exception:
+            # 失败则退化为末尾插入
+            vw = self.card_scroll.viewport().width() if hasattr(self.card_scroll, 'viewport') else 600
+            card_w = 130
+            gap = self.card_grid.horizontalSpacing() or 20
+            cols = max(1, min(8, vw // (card_w + gap)))
+            return len(self._current_names), cols
+
+    def rebuild_grid_with_placeholder(self, insert_index, cols):
+        try:
+            from PyQt5.QtWidgets import QFrame
+            vw = self.card_scroll.viewport().width() if hasattr(self.card_scroll, 'viewport') else 600
+            card_w = 130
+            gap = self.card_grid.horizontalSpacing() or 20
+            for name, w in list(self._current_card_widgets.items()):
+                try:
+                    self.card_grid.removeWidget(w)
+                    w.hide()
+                except Exception:
+                    pass
+            placeholder = getattr(self, '_placeholder_widget', None)
+            if placeholder is None:
+                placeholder = QFrame(self.card_host)
+                placeholder.setFixedSize(130, 210)
+                placeholder.setStyleSheet('QFrame{border:2px dashed #3498db; border-radius:10px; background:transparent;}')
+                self._placeholder_widget = placeholder
+            row = 0
+            col = 0
+            display_names = [n for n in self._current_names if n != getattr(self, '_drag_src_name', None)]
+            try:
+                print(f"[DND] rebuild placeholder at {insert_index}; display_names={display_names}")
+            except Exception:
+                pass
+            count = len(display_names)
+            for i in range(count + 1):
+                if i == insert_index:
+                    self.card_grid.addWidget(placeholder, row, col)
+                    placeholder.show()
+                    col += 1
+                    if col >= cols:
+                        col = 0
+                        row += 1
+                if i < count:
+                    name = display_names[i]
+                    w = self._current_card_widgets.get(name)
+                    if w:
+                        self.card_grid.addWidget(w, row, col)
+                        w.show()
+                        col += 1
+                        if col >= cols:
+                            col = 0
+                            row += 1
+            for i in range(0, 12):
+                self.card_grid.setColumnStretch(i, 0)
+            self.card_grid.setColumnStretch(cols, 1)
+        except Exception:
+            pass
+
+    def rebuild_grid_original(self):
+        try:
+            vw = self.card_scroll.viewport().width() if hasattr(self.card_scroll, 'viewport') else 600
+            card_w = 130
+            gap = self.card_grid.horizontalSpacing() or 20
+            cols = max(1, min(8, vw // (card_w + gap)))
+            for name, w in list(self._current_card_widgets.items()):
+                try:
+                    self.card_grid.removeWidget(w)
+                    w.hide()
+                except Exception:
+                    pass
+            row = 0
+            col = 0
+            for name in self._current_names:
+                if getattr(self, '_dragging', False) and name == getattr(self, '_drag_src_name', None):
+                    continue
+                w = self._current_card_widgets.get(name)
+                if w:
+                    self.card_grid.addWidget(w, row, col)
+                    w.show()
+                    col += 1
+                    if col >= cols:
+                        col = 0
+                        row += 1
+            for i in range(0, 12):
+                self.card_grid.setColumnStretch(i, 0)
+            self.card_grid.setColumnStretch(cols, 1)
+        except Exception:
+            pass
+
+    def show_drop_indicator(self, insert_index, cols):
+        try:
+            m = self.card_grid.contentsMargins()
+            card_w = 130
+            card_h = 210
+            gap_w = self.card_grid.horizontalSpacing() or 20
+            gap_h = self.card_grid.verticalSpacing() or 20
+            col = max(0, insert_index % max(1, cols))
+            row = max(0, insert_index // max(1, cols))
+            ix = m.left() + col * (card_w + gap_w) - 2
+            iy = m.top() + row * (card_h + gap_h)
+            from PyQt5.QtWidgets import QFrame
+            if not hasattr(self, '_drop_indicator') or self._drop_indicator is None:
+                self._drop_indicator = QFrame(self.card_host)
+                self._drop_indicator.setStyleSheet('background-color:#3498db; border-radius:2px;')
+            self._drop_indicator.setGeometry(ix, iy, 4, card_h)
+            self._drop_indicator.show()
+        except Exception:
+            pass
+
+    def show_global_group_hint(self, show=True):
+        try:
+            from PyQt5.QtWidgets import QLabel
+            vp = self.card_scroll.viewport()
+            if show:
+                if not hasattr(self, '_global_hint') or self._global_hint is None:
+                    self._global_hint = QLabel('松手创建分组', vp)
+                    self._global_hint.setStyleSheet('background:rgba(52,152,219,220); color:white; padding:6px 12px; border-radius:8px;')
+                self._global_hint.adjustSize()
+                w = self._global_hint.width()
+                self._global_hint.move((vp.width() - w) // 2, 8)
+                self._global_hint.show()
+            else:
+                if hasattr(self, '_global_hint') and self._global_hint:
+                    self._global_hint.hide()
+        except Exception:
+            pass
+
+    def on_group_open(self, index):
+        # 切换到该分组视图
+        for i in range(self.shelf_list.count()):
+            item = self.shelf_list.item(i)
+            data = item.data(Qt.UserRole)
+            if data.get('type') == 'group' and data.get('index') == index:
+                self.shelf_list.setCurrentRow(i)
+                break
+        self.update_back_button()
+
+    def rename_group_by_index(self, index):
+        self.rename_group_at([index])
+
+    def delete_group_by_index(self, index):
+        self.delete_group_at([index])
+
+    def on_drop_book_to_group(self, book_name, index):
+        self.move_book_to_group(book_name, index)
+        self.clean_empty_groups()
+        self.save_bookshelf_data()
+        self.refresh_bookshelf()
+
+    def back_to_all(self):
+        # 切回“全部”
+        self.shelf_list.setCurrentRow(0)
+        self.update_back_button()
+
+    def update_back_button(self):
+        cur = self.shelf_list.currentItem()
+        if not cur:
+            self.back_button.setVisible(False)
+            return
+        data = cur.data(Qt.UserRole)
+        self.back_button.setVisible(data.get('type') == 'group')
 
     def on_shelf_changed(self):
         self.populate_cards_for_current_category()
+        self.update_back_button()
 
     def on_tools_changed(self):
         item = self.tools_list.currentItem()
@@ -1043,6 +1581,7 @@ class MainWindow(_BaseMainWindow):
                     for c in node.get('children', []):
                         remove_name(c)
                 remove_name(self.groups_data)
+                self.clean_empty_groups()
                 # 历史
                 if file_path:
                     self.history_manager.remove_book(file_path)
@@ -1176,6 +1715,7 @@ class MainWindow(_BaseMainWindow):
                     self.history_manager.remove_book(file_path)
                 
                 # 保存数据并刷新显示
+                self.clean_empty_groups()
                 self.save_bookshelf_data()
                 self.refresh_bookshelf()
                 self.update_continue_button_state()
