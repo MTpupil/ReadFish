@@ -116,14 +116,30 @@ class MainWindow(_BaseMainWindow):
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(20, 20, 20, 20)
         
-        # 标题标签
-        title_label = QLabel('ReadFish by.木瞳')
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setFont(QFont('Microsoft YaHei', 16, QFont.Bold))
-        title_label.setStyleSheet('color: #2c3e50; margin-bottom: 10px;')
+        # 顶部栏：左侧显示logo与标题
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(0, 0, 0, 0)
+        top_bar.setSpacing(8)
+        logo_lbl = QLabel()
+        logo_lbl.setFixedSize(24, 24)
+        logo_lbl.setScaledContents(True)
+        try:
+            icon_path_for_bar = find_icon_file()
+            if icon_path_for_bar and os.path.exists(icon_path_for_bar):
+                pm = QPixmap(icon_path_for_bar)
+                if not pm.isNull():
+                    logo_lbl.setPixmap(pm.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception:
+            pass
+        title_text = QLabel('ReadFish')
+        title_text.setFont(QFont('Microsoft YaHei', 16, QFont.Bold))
+        title_text.setStyleSheet('color: #2c3e50;')
+        top_bar.addWidget(logo_lbl)
+        top_bar.addWidget(title_text)
+        top_bar.addStretch()
         
         modern_root = self.create_modern_bookshelf_tab()
-        main_layout.addWidget(title_label)
+        main_layout.addLayout(top_bar)
         main_layout.addWidget(modern_root)
 
         # 无边框标题栏置顶以支持拖动
@@ -725,6 +741,10 @@ class MainWindow(_BaseMainWindow):
                 'import_time': timestamp,
                 'display_name': book_name
             }
+            # 确保书籍被添加到"未分组"分组中
+            self.ensure_groups_structure()
+            if not book_name in self.groups_data['children'][0]['books']:
+                self.groups_data['children'][0]['books'].append(book_name)
             self.save_bookshelf_data()
             self.refresh_bookshelf()
             QMessageBox.information(self, '成功', f'书籍"{book_name}"已成功导入书架！')
@@ -1014,6 +1034,21 @@ class MainWindow(_BaseMainWindow):
         
         # 分组树构建
         self.ensure_groups_structure()
+        
+        # 同步所有书籍到分组中：确保所有books_data中的书籍都在某个分组
+        # 先收集所有已分组的书籍
+        grouped_books = set()
+        for group in self.groups_data.get('children', []):
+            grouped_books.update(group.get('books', []))
+        
+        # 找出未分组的书籍并添加到"未分组"中
+        ungrouped_books = set(self.books_data.keys()) - grouped_books
+        if ungrouped_books:
+            # 添加到第一个分组（通常是"未分组"）
+            if not self.groups_data['children']:
+                self.groups_data['children'].append({'name': '未分组', 'children': [], 'books': []})
+            self.groups_data['children'][0]['books'].extend(ungrouped_books)
+            self.save_bookshelf_data()
         if hasattr(self, 'book_tree'):
             self.build_tree_view()
         if hasattr(self, 'shelf_list'):
@@ -1088,8 +1123,8 @@ class MainWindow(_BaseMainWindow):
         self.tools_list.clear()
         settings_item = QListWidgetItem('设置')
         settings_item.setData(Qt.UserRole, {'type': 'settings'})
-        help_item = QListWidgetItem('帮助')
-        help_item.setData(Qt.UserRole, {'type': 'help'})
+        help_item = QListWidgetItem('关于')
+        help_item.setData(Qt.UserRole, {'type': 'about'})
         self.tools_list.addItem(settings_item)
         self.tools_list.addItem(help_item)
 
@@ -1435,8 +1470,8 @@ class MainWindow(_BaseMainWindow):
         t = data.get('type')
         if t == 'settings':
             self.open_settings()
-        elif t == 'help':
-            self.show_help()
+        elif t == 'about':
+            self.show_about()
 
     def open_settings(self):
         try:
@@ -1451,14 +1486,14 @@ class MainWindow(_BaseMainWindow):
         except Exception as e:
             QMessageBox.critical(self, '错误', f'打开设置失败：{str(e)}')
 
-    def show_help(self):
+    def show_about(self):
         msg = (
-            'ReadFish 书架重构版：\n'
-            ' - 左侧选择分组或功能\n'
-            ' - 右侧双击书籍继续阅读；右键菜单提供所有操作\n'
-            ' - 顶部可导入/刷新/打开书架目录'
+            'ReadFish\n\n'
+            '作者：MTpupil\n'
+            '公众号：木瞳科技Pro\n'
+            'GitHub：https://github.com/MTpupil'
         )
-        QMessageBox.information(self, '帮助', msg)
+        QMessageBox.information(self, '关于', msg)
 
     def read_book_from_tree(self, item, column):
         """树节点双击阅读（叶子节点）"""
