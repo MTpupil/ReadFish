@@ -6,8 +6,12 @@
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QMenu, QAction,
-    QApplication, QMessageBox, QCheckBox
+    QApplication, QMessageBox, QCheckBox, QLabel
 )
+from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QEvent, QRect, QTimer
+from PyQt5.QtGui import QFont, QColor, QPalette, QPainter, QPen, QCursor, QPixmap
+import ctypes
+from ctypes import wintypes
 
 
 class NoZoomTextEdit(QTextEdit):
@@ -25,10 +29,148 @@ class NoZoomTextEdit(QTextEdit):
         """重写滚轮事件，完全禁用缩放"""
         # 不调用父类的wheelEvent，完全忽略滚轮事件
         event.ignore()
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QEvent, QRect, QTimer
-from PyQt5.QtGui import QFont, QColor, QPalette, QPainter, QPen, QCursor, QPixmap
-import ctypes
-from ctypes import wintypes
+
+class ProgressTooltip(QWidget):
+    """进度提示悬浮窗 - 显示章节信息和阅读进度"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        
+        # 设置窗口属性
+        self.setAttribute(Qt.WA_TranslucentBackground, True)  # 窗口全透明
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)  # 显示时不激活窗口
+        self.setAttribute(Qt.WA_NoSystemBackground, True)     # 无系统背景
+        
+        # 初始化UI
+        self.init_ui()
+        
+        # 初始隐藏
+        self.hide()
+        
+        # 记录上次更新的位置和内容，避免频繁更新导致闪动
+        self._last_pos = None
+        self._last_chapter = None
+        self._last_book_progress = None
+        self._last_chapter_progress = None
+    
+    def init_ui(self):
+        """初始化UI组件"""
+        # 主布局
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 章节名称
+        self.chapter_label = QLabel()
+        self.chapter_label.setFont(QFont('Microsoft YaHei', 10, QFont.Bold))
+        self.chapter_label.setStyleSheet('color: rgba(255, 255, 255, 0.9); background: transparent;')
+        layout.addWidget(self.chapter_label)
+        
+        # 全书进度
+        self.book_progress_label = QLabel()
+        self.book_progress_label.setFont(QFont('Microsoft YaHei', 9))
+        self.book_progress_label.setStyleSheet('color: rgba(255, 255, 255, 0.8); background: transparent;')
+        layout.addWidget(self.book_progress_label)
+        
+        # 本章进度
+        self.chapter_progress_label = QLabel()
+        self.chapter_progress_label.setFont(QFont('Microsoft YaHei', 9))
+        self.chapter_progress_label.setStyleSheet('color: rgba(255, 255, 255, 0.8); background: transparent;')
+        layout.addWidget(self.chapter_progress_label)
+        
+        # 调整窗口大小以适应内容
+        self.adjustSize()
+        
+        # 设置半透明背景效果（移除backdrop-filter以避免警告）
+        self.setStyleSheet(
+            """QWidget {
+            background-color: rgba(0, 0, 0, 0.6);  /* 半透明黑色背景，增强可读性 */
+            border-radius: 8px;  /* 圆角边框 */
+            }"""
+        )
+    
+    def update_progress(self, chapter_name, book_progress, chapter_progress):
+        """更新进度信息
+        
+        Args:
+            chapter_name (str): 当前章节名称
+            book_progress (float): 全书进度 (0-100)
+            chapter_progress (float): 本章进度 (0-100)
+        """
+        # 防抖逻辑：只有内容变化时才更新，避免频繁更新导致闪动
+        if (self._last_chapter == chapter_name and 
+            abs(self._last_book_progress - book_progress) < 0.1 and 
+            abs(self._last_chapter_progress - chapter_progress) < 0.1):
+            return  # 内容没有明显变化，不更新
+        
+        # 更新显示内容
+        self.chapter_label.setText(chapter_name)
+        self.book_progress_label.setText(f'全书进度: {book_progress:.1f}%')
+        self.chapter_progress_label.setText(f'本章进度: {chapter_progress:.1f}%')
+        
+        # 调整窗口大小以适应新内容
+        self.adjustSize()
+        
+        # 保存当前状态
+        self._last_chapter = chapter_name
+        self._last_book_progress = book_progress
+        self._last_chapter_progress = chapter_progress
+    
+    def show_at_position(self, pos, reader_rect):
+        """在指定位置显示悬浮窗，避免边缘重叠
+        
+        Args:
+            pos (QPoint): 鼠标位置
+            reader_rect (QRect): 阅读器窗口矩形
+        """
+        # 位置防抖逻辑：只有位置变化明显时才更新位置
+        if self._last_pos is not None:
+            # 计算鼠标位置变化距离
+            dx = abs(pos.x() - self._last_pos.x())
+            dy = abs(pos.y() - self._last_pos.y())
+            # 如果位置变化小于5像素，不更新位置
+            if dx < 5 and dy < 5:
+                # 只需要显示，不需要更新位置
+                self.show()
+                return
+        
+        # 获取屏幕尺寸
+        screen = QApplication.primaryScreen()
+        screen_rect = screen.availableGeometry()
+        
+        # 获取悬浮窗尺寸
+        tooltip_rect = self.geometry()
+        tooltip_width = tooltip_rect.width()
+        tooltip_height = tooltip_rect.height()
+        
+        # 计算初始位置（鼠标右上角）
+        x = pos.x() + 10
+        y = pos.y() - tooltip_height - 10
+        
+        # 边缘回避处理
+        # 右边没空间，显示在左边
+        if x + tooltip_width > screen_rect.right():
+            x = pos.x() - tooltip_width - 10
+        
+        # 上边没空间，显示在下方
+        if y < screen_rect.top():
+            y = pos.y() + 10
+        
+        # 下边没空间，显示在上方
+        if y + tooltip_height > screen_rect.bottom():
+            y = pos.y() - tooltip_height - 10
+        
+        # 移除不允许覆盖阅读器窗口的逻辑，允许悬浮窗覆盖阅读器
+        
+        # 确保悬浮窗完全在屏幕内
+        x = max(screen_rect.left(), min(x, screen_rect.right() - tooltip_width))
+        y = max(screen_rect.top(), min(y, screen_rect.bottom() - tooltip_height))
+        
+        # 设置位置并显示
+        self.setGeometry(x, y, tooltip_width, tooltip_height)
+        self.show()
+        
+        # 保存当前位置
+        self._last_pos = pos
 import os
 
 from config_window import ConfigWindow
@@ -96,9 +238,21 @@ class ReaderWindow(QWidget):
         # 临时固定显示标志
         self.is_temporarily_fixed = False
         
+        # 章节信息悬浮窗
+        self.progress_tooltip = None
+        
+        # 安装全局事件过滤器，用于监听Ctrl+`组合键，无论是否有焦点
+        self.install_global_event_filter()
+        
         self.init_ui()
         self.prepare_text_content()  # 准备文本内容
         self.load_config()
+        
+        # 创建悬浮窗实例
+        self.progress_tooltip = ProgressTooltip(self)
+        
+        # 预解析章节信息并缓存，避免第一次按Ctrl+E时的延迟
+        self.get_current_chapter_info()
         
         # 恢复阅读位置（必须在文本内容准备完成后调用）
         if self.should_restore_position:
@@ -1233,6 +1387,143 @@ class ReaderWindow(QWidget):
         else:
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
         self.show()  # 重新显示窗口以应用标志更改
+    
+    def get_current_chapter_info(self):
+        """获取当前章节信息和进度"""
+        # 获取当前行号
+        current_line = self.current_line_index + 1
+        total_lines = len(self.text_lines)
+        
+        # 计算全书进度
+        book_progress = (current_line / total_lines) * 100 if total_lines > 0 else 0
+        
+        # 默认章节信息
+        chapter_name = "未识别章节"
+        chapter_progress = 0.0
+        
+        try:
+            # 检查是否已缓存章节信息，避免重复解析
+            if not hasattr(self, '_cached_chapters') or not self._cached_chapters:
+                # 导入目录解析器
+                from table_of_contents import TableOfContents
+                
+                # 创建目录解析器实例
+                toc_parser = TableOfContents()
+                
+                # 解析当前文本的章节
+                chapters = toc_parser.parse_contents(self.full_text)
+                
+                # 缓存章节信息
+                self._cached_chapters = chapters
+            else:
+                # 使用缓存的章节信息
+                chapters = self._cached_chapters
+            
+            if chapters:
+                # 查找当前行所在的章节
+                current_chapter_index = -1
+                for i, chapter in enumerate(chapters):
+                    if current_line >= chapter['line_number']:
+                        current_chapter_index = i
+                    else:
+                        break
+                
+                if current_chapter_index >= 0:
+                    # 获取当前章节信息
+                    current_chapter = chapters[current_chapter_index]
+                    chapter_name = current_chapter['title']
+                    
+                    # 计算本章进度
+                    # 本章起始行号
+                    chapter_start = current_chapter['line_number']
+                    
+                    # 本章结束行号（下一章的起始行号减1，或文件末尾）
+                    if current_chapter_index < len(chapters) - 1:
+                        chapter_end = chapters[current_chapter_index + 1]['line_number'] - 1
+                    else:
+                        chapter_end = total_lines
+                    
+                    # 计算本章进度
+                    chapter_length = chapter_end - chapter_start + 1
+                    if chapter_length > 0:
+                        chapter_progress = ((current_line - chapter_start + 1) / chapter_length) * 100
+        
+        except Exception as e:
+            # 如果获取章节信息失败，使用默认值
+            pass
+        
+        return chapter_name, book_progress, chapter_progress
+    
+    def show_progress_tooltip(self):
+        """显示进度悬浮窗"""
+        if not self.progress_tooltip:
+            return
+        
+        # 获取鼠标位置
+        mouse_pos = QCursor.pos()
+        
+        # 获取阅读器窗口矩形
+        reader_rect = self.geometry()
+        
+        # 检查鼠标是否在阅读器窗口内
+        if not reader_rect.contains(mouse_pos):
+            # 鼠标不在阅读器内，隐藏悬浮窗
+            self.hide_progress_tooltip()
+            return
+        
+        # 添加标志位，确保按住Ctrl+E期间只更新一次悬浮窗内容
+        if not hasattr(self, '_tooltip_updated') or not self._tooltip_updated:
+            # 获取当前章节信息和进度
+            chapter_name, book_progress, chapter_progress = self.get_current_chapter_info()
+            
+            # 更新悬浮窗内容
+            self.progress_tooltip.update_progress(chapter_name, book_progress, chapter_progress)
+            
+            # 标记已经更新过内容
+            self._tooltip_updated = True
+        
+        # 在鼠标位置显示悬浮窗
+        self.progress_tooltip.show_at_position(mouse_pos, reader_rect)
+        
+        # 启动定时器持续检查鼠标位置，确保鼠标移出时隐藏悬浮窗
+        if not hasattr(self, '_tooltip_mouse_timer'):
+            self._tooltip_mouse_timer = QTimer(self)
+            self._tooltip_mouse_timer.timeout.connect(self.check_tooltip_mouse_position)
+        self._tooltip_mouse_timer.start(100)  # 每100毫秒检查一次
+        
+    def check_tooltip_mouse_position(self):
+        """持续检查鼠标位置，确保悬浮窗只在鼠标位于阅读器内时显示"""
+        if not self.progress_tooltip or not self.progress_tooltip.isVisible():
+            # 如果悬浮窗不可见，停止检查
+            if hasattr(self, '_tooltip_mouse_timer'):
+                self._tooltip_mouse_timer.stop()
+            return
+        
+        # 获取鼠标位置
+        mouse_pos = QCursor.pos()
+        
+        # 获取阅读器窗口矩形
+        reader_rect = self.geometry()
+        
+        # 检查鼠标是否在阅读器窗口内
+        if not reader_rect.contains(mouse_pos):
+            # 鼠标不在阅读器内，隐藏悬浮窗
+            self.hide_progress_tooltip()
+            # 停止定时器
+            if hasattr(self, '_tooltip_mouse_timer'):
+                self._tooltip_mouse_timer.stop()
+    
+    def hide_progress_tooltip(self):
+        """隐藏进度悬浮窗"""
+        if self.progress_tooltip:
+            self.progress_tooltip.hide()
+        
+        # 重置标志位，允许下次显示时重新更新内容
+        self._tooltip_updated = False
+        
+        # 停止定时器，避免资源浪费
+        if hasattr(self, '_tooltip_mouse_timer'):
+            self._tooltip_mouse_timer.stop()
         
     def back_to_main(self):
         """返回主窗口"""
@@ -1271,12 +1562,100 @@ class ReaderWindow(QWidget):
         visible_lines = self.text_lines[start_line:end_line]
         return '\n'.join(visible_lines)
         
+    def install_global_event_filter(self):
+        """安装全局事件过滤器，用于监听Ctrl+`组合键"""
+        # 全局事件过滤器已经在当前类中实现，不需要单独创建
+        # 我们将使用定时器定期检查键盘状态，确保无论窗口是否有焦点都能捕获Ctrl+`组合键
+        if not hasattr(self, '_global_hotkey_timer'):
+            self._global_hotkey_timer = QTimer(self)
+            self._global_hotkey_timer.timeout.connect(self.check_global_hotkey)
+            self._global_hotkey_timer.start(100)  # 每100毫秒检查一次
+        
+    def remove_global_event_filter(self):
+        """移除全局事件过滤器"""
+        # 停止全局热键定时器
+        if hasattr(self, '_global_hotkey_timer'):
+            self._global_hotkey_timer.stop()
+            delattr(self, '_global_hotkey_timer')
+        
+    def check_global_hotkey(self):
+        """定期检查全局热键状态，不依赖于窗口焦点"""
+        try:
+            import ctypes
+            # VK_BACKQUOTE = 0xC0，VK_CONTROL = 0x11
+            # 使用GetAsyncKeyState检测按键状态，确保全局生效
+            backquote_state = ctypes.windll.user32.GetAsyncKeyState(0xC0) & 0x8000
+            ctrl_state = ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000
+            
+            # 检查是否同时按下了Ctrl+`组合键
+            if backquote_state and ctrl_state:
+                # 只在按键按下的瞬间处理，避免重复触发
+                if not getattr(self, '_hotkey_was_pressed', False):
+                    # 无论是否有焦点，只要是固定状态，就取消固定并隐藏窗口
+                    if self.is_temporarily_fixed:
+                        self.is_temporarily_fixed = False
+                        self.content_visible = False
+                        self.hide()
+                    
+                    # 标记按键已按下
+                    self._hotkey_was_pressed = True
+            else:
+                # 按键已释放，重置标记
+                self._hotkey_was_pressed = False
+        except:
+            # 忽略异常，避免影响程序运行
+            pass
+    
+    def eventFilter(self, obj, event):
+        """事件过滤器 - 处理窗口内的事件"""
+        # 调用原有的事件过滤器逻辑
+        text_edit = getattr(self, 'text_edit', None)
+        background_frame = getattr(self, 'background_frame', None)
+        
+        if obj == text_edit or obj == background_frame or (text_edit and obj == text_edit.viewport()):
+            if event.type() == QEvent.MouseButtonPress:
+                # 将鼠标按下事件传递给父窗口
+                self.mousePressEvent(event)
+                return True
+            elif event.type() == QEvent.MouseMove:
+                # 将鼠标移动事件传递给父窗口
+                self.mouseMoveEvent(event)
+                return True
+            elif event.type() == QEvent.MouseButtonRelease:
+                # 将鼠标释放事件传递给父窗口
+                self.mouseReleaseEvent(event)
+                return True
+            elif event.type() == QEvent.Enter:
+                # 鼠标进入事件
+                self.is_mouse_over = True
+                self.update_content_visibility()
+                return True
+            elif event.type() == QEvent.Leave:
+                # 鼠标离开事件
+                self.is_mouse_over = False
+                self.update_content_visibility()
+                return True
+            elif event.type() == QEvent.Wheel and (obj == text_edit or (text_edit and obj == text_edit.viewport())):
+                # 完全拦截文本编辑器的所有滚轮事件，防止任何字体调节
+                # 无论是否按下修饰键，都将滚轮事件传递给父窗口处理翻页功能
+                self.wheelEvent(event)
+                return True  # 阻止事件传递给QTextEdit，完全禁用其滚轮响应
+        
+        return super().eventFilter(obj, event)
+    
     def closeEvent(self, event):
         """窗口关闭事件"""
         # 停止定时器
         if hasattr(self, 'mouse_check_timer'):
             self.mouse_check_timer.stop()
-            
+        
+        # 停止悬浮窗相关定时器
+        if hasattr(self, '_tooltip_mouse_timer'):
+            self._tooltip_mouse_timer.stop()
+        
+        # 移除全局事件过滤器
+        self.remove_global_event_filter()
+        
         self.save_window_position()
         
         # 关闭配置窗口
@@ -1343,16 +1722,22 @@ class ReaderWindow(QWidget):
             self.show_config_window()
         # Ctrl+` 临时固定显示阅读器
         elif event.key() == Qt.Key_QuoteLeft and event.modifiers() == Qt.ControlModifier:
-            # 切换临时固定显示状态
-            self.is_temporarily_fixed = not self.is_temporarily_fixed
             if self.is_temporarily_fixed:
-                # 临时固定，保持显示
-                self.content_visible = True
-                self.show()
-            else:
-                # 取消临时固定，立即隐藏阅读器
+                # 如果已经固定，直接取消固定并隐藏，无需焦点
+                self.is_temporarily_fixed = False
                 self.content_visible = False
                 self.hide()
+            else:
+                # 固定时需要焦点
+                if self.hasFocus():
+                    # 临时固定，保持显示
+                    self.is_temporarily_fixed = True
+                    self.content_visible = True
+                    self.show()
+        # Ctrl+E 显示章节信息和进度悬浮窗
+        elif event.key() == Qt.Key_E and event.modifiers() == Qt.ControlModifier:
+            # 显示悬浮窗
+            self.show_progress_tooltip()
         # 上键翻页
         elif event.key() == Qt.Key_Up:
             if content_visible_now:
@@ -1421,7 +1806,13 @@ class ReaderWindow(QWidget):
         if key_released:
             self.is_key_pressed = False
             self.update_content_visibility()
-            
+        
+        # 修复Ctrl+E窗口不消失问题：只要释放了Ctrl或E键，就隐藏悬浮窗
+        if event.key() in [Qt.Key_Control, Qt.Key_E]:
+            # 检查是否还同时按住了Ctrl+E，使用event.modifiers()代替keyboardModifiers()
+            if not (event.modifiers() & Qt.ControlModifier and event.key() != Qt.Key_Control):
+                self.hide_progress_tooltip()
+        
         super().keyReleaseEvent(event)
             
     def wheelEvent(self, event):

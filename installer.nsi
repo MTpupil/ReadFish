@@ -6,7 +6,7 @@
 
 ; 应用程序信息
 !define APP_NAME "ReadFish"
-!define APP_VERSION "1.1.0"
+!define APP_VERSION "1.2.0"
 !define APP_PUBLISHER "ReadFish Team"
 !define APP_URL "https://github.com/readfish/readfish"
 !define APP_DESCRIPTION "上班摸鱼看小说工具"
@@ -23,7 +23,7 @@ SetCompressor /SOLID lzma
 SetCompressorDictSize 32
 
 ; 版本信息
-VIProductVersion "1.1.0.0"
+VIProductVersion "1.2.0.0"
 VIAddVersionKey "ProductName" "${APP_NAME}"
 VIAddVersionKey "ProductVersion" "${APP_VERSION}"
 VIAddVersionKey "CompanyName" "${APP_PUBLISHER}"

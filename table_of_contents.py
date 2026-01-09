@@ -8,8 +8,8 @@ import re
 import logging
 from typing import List, Dict, Tuple, Optional
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 配置日志 - 生产环境中设置为WARNING级别，减少日志输出
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 class TableOfContents:

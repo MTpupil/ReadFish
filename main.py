@@ -13,18 +13,18 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
     QWidget, QPushButton, QLabel, QFileDialog, QMessageBox,
     QSystemTrayIcon, QMenu, QAction, QListWidget, QListWidgetItem,
-    QInputDialog, QTabWidget, QFrame, QSplitter, QTreeWidget, QTreeWidgetItem,
+    QInputDialog, QFrame, QTreeWidget, QTreeWidgetItem,
     QScrollArea, QGridLayout, QGraphicsDropShadowEffect, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QSize, QTimer
-from PyQt5.QtGui import QFont, QIcon, QPixmap, QPainter, QFontDatabase, QColor
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont, QIcon, QPixmap, QPainter, QColor
 
 from reader_window import ReaderWindow
 from config_manager import ConfigManager
 from history_manager import HistoryManager
 from book_item_widget import BookItemWidget, BookCardWidget
 from book_item_widget import FolderCardWidget
-from file_utils import detect_encoding_and_read_file, read_file_content
+from file_utils import read_file_content
 from resource_path import get_resource_path, find_icon_file
 
 # 现代UI：无边框窗口（可选）
@@ -38,7 +38,7 @@ try:
     from qfluentwidgets import PrimaryPushButton, setTheme, Theme, SwitchButton
 except Exception:
     PrimaryPushButton = QPushButton
-    def setTheme(x):
+    def setTheme(_):
         pass
     class Theme:
         AUTO = None
@@ -98,7 +98,7 @@ class MainWindow(_BaseMainWindow):
             icon = QIcon(icon_path)
             if not icon.isNull():
                 self.setWindowIcon(icon)
-                print(f"[DEBUG] 窗口图标设置成功: {icon_path}")
+
             else:
                 print(f"[WARNING] 图标文件加载失败: {icon_path}")
         else:
@@ -346,7 +346,7 @@ class MainWindow(_BaseMainWindow):
         try:
             # 使用资源路径处理模块获取正确的二维码图片路径
             qr_path = get_resource_path('qrcode.png')
-            print(f"[DEBUG] 尝试加载二维码图片: {qr_path}")
+
             
             # 检查文件是否存在
             if os.path.exists(qr_path):
@@ -355,7 +355,7 @@ class MainWindow(_BaseMainWindow):
                     # 缩放图片以适应标签大小
                     scaled_pixmap = qr_pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     qr_label.setPixmap(scaled_pixmap)
-                    print(f"[DEBUG] 二维码图片加载成功: {qr_path}")
+
                 else:
                     print(f"[WARNING] 二维码图片加载失败(null pixmap): {qr_path}")
                     # 如果图片加载失败，显示文字
@@ -756,7 +756,6 @@ class MainWindow(_BaseMainWindow):
         vp = self.card_scroll.viewport() if hasattr(self, 'card_scroll') else None
         if obj is getattr(self, 'book_list', None) or obj is getattr(self, 'book_tree', None) or obj is getattr(self, 'card_scroll', None) or obj is getattr(self, 'shelf_list', None) or obj is getattr(self, 'card_host', None) or (vp is not None and obj is vp):
             from PyQt5.QtCore import QEvent
-            from PyQt5.QtGui import QDropEvent
             if event.type() == QEvent.DragEnter or event.type() == QEvent.DragMove:
                 mime = event.mimeData()
                 if mime.hasUrls() or (mime.hasText() and mime.text().startswith('book:')):
@@ -1228,7 +1227,7 @@ class MainWindow(_BaseMainWindow):
                 row += 1
         
 
-    def update_drop_indicator(self, obj, pos):
+    def update_drop_indicator(self, _, __):
         return
 
     def clear_drop_indicator(self):
@@ -1243,7 +1242,7 @@ class MainWindow(_BaseMainWindow):
         self._drag_src_name = None
         # 拖拽阶段不重排，仅清除指示即可
 
-    def apply_drop_reorder(self, src_name):
+    def apply_drop_reorder(self, _):
         return
 
     def compute_insert_index(self, x, y):
@@ -1275,7 +1274,7 @@ class MainWindow(_BaseMainWindow):
                     row_starts.append((len(row_starts), idx, r.top()))
             # 确定p所在行（落点y与行top比较）；若在某行上方，插入该行起始；下方则最后
             target_row = 0
-            for ridx, start_idx, top in row_starts:
+            for ridx, _, top in row_starts:
                 if y <= top + 210:
                     target_row = ridx
                     break
@@ -1307,9 +1306,6 @@ class MainWindow(_BaseMainWindow):
     def rebuild_grid_with_placeholder(self, insert_index, cols):
         try:
             from PyQt5.QtWidgets import QFrame
-            vw = self.card_scroll.viewport().width() if hasattr(self.card_scroll, 'viewport') else 600
-            card_w = 130
-            gap = self.card_grid.horizontalSpacing() or 20
             for name, w in list(self._current_card_widgets.items()):
                 try:
                     self.card_grid.removeWidget(w)
@@ -1495,7 +1491,7 @@ class MainWindow(_BaseMainWindow):
         )
         QMessageBox.information(self, '关于', msg)
 
-    def read_book_from_tree(self, item, column):
+    def read_book_from_tree(self, item, _):
         """树节点双击阅读（叶子节点）"""
         data = item.data(0, Qt.UserRole)
         if isinstance(data, dict) and 'file_path' in data:
@@ -2162,8 +2158,6 @@ class MainWindow(_BaseMainWindow):
                 print(f"[WARNING] 托盘图标加载失败: {icon_path}")
                 # 创建备选图标（绿色圆点）
                 icon = self.create_fallback_icon()
-            else:
-                print(f"[DEBUG] 托盘图标设置成功: {icon_path}")
         else:
             print(f"[ERROR] 未找到图标文件，使用备选图标")
             # 创建备选图标（绿色圆点）
@@ -2262,7 +2256,7 @@ def main():
                 app.setProperty('windowIcon', app_icon)
             except:
                 pass
-            print(f"[DEBUG] 应用程序图标设置成功: {icon_path}")
+
         else:
             print(f"[WARNING] 应用程序图标加载失败: {icon_path}")
     else:
