@@ -18,6 +18,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt5.QtGui import QFont, QIcon, QTextCharFormat, QColor
 
 from file_utils import detect_encoding_and_read_file, read_file_content
+from table_of_contents import TableOfContents
 
 
 class SearchThread(QThread):
@@ -29,14 +30,16 @@ class SearchThread(QThread):
     search_finished = pyqtSignal(int)  # 搜索完成信号，参数为总结果数
     search_error = pyqtSignal(str)     # 搜索错误信号
     
-    def __init__(self, file_path, keyword, case_sensitive=False, whole_word=False, use_regex=False):
+    def __init__(self, file_path, keyword, case_sensitive=False, whole_word=False, use_regex=False, start_line=1):
         super().__init__()
         self.file_path = file_path
         self.keyword = keyword
         self.case_sensitive = case_sensitive
         self.whole_word = whole_word
         self.use_regex = use_regex
+        self.start_line = start_line  # 搜索起始行号
         self.is_cancelled = False
+        self.chapters = []  # 存储章节信息
         
     def run(self):
         """执行搜索"""
@@ -51,22 +54,30 @@ class SearchThread(QThread):
             total_lines = len(lines)
             results_count = 0
             
+            # 解析章节信息
+            toc_parser = TableOfContents()
+            self.chapters = toc_parser.parse_contents(content)
+            
             # 准备搜索模式
             search_pattern = self.prepare_search_pattern()
             if not search_pattern:
                 self.search_error.emit('搜索模式无效')
                 return
                 
-            # 逐行搜索
-            for line_num, line in enumerate(lines, 1):
+            # 逐行搜索，从start_line开始
+            start_index = max(0, self.start_line - 1)  # 转换为0基索引
+            for line_num in range(self.start_line, total_lines + 1):
                 if self.is_cancelled:
                     break
                     
                 # 更新进度
                 if line_num % 100 == 0:  # 每100行更新一次进度
-                    progress = int((line_num / total_lines) * 100)
+                    progress = int(((line_num - self.start_line + 1) / (total_lines - self.start_line + 1)) * 100) if (total_lines - self.start_line + 1) > 0 else 100
                     self.search_progress.emit(progress)
                     
+                line_index = line_num - 1
+                line = lines[line_index]
+                
                 # 搜索匹配
                 matches = self.find_matches_in_line(line, search_pattern)
                 
@@ -74,15 +85,20 @@ class SearchThread(QThread):
                     if self.is_cancelled:
                         break
                         
+                    # 获取当前行所在的章节
+                    chapter_info = self.get_chapter_info(line_num)
+                    
                     # 创建搜索结果
                     result = {
                         'line_number': line_num,
+                        'chapter': chapter_info['chapter'],
+                        'chapter_title': chapter_info['title'],
                         'line_content': line.strip(),
                         'match_start': match['start'],
                         'match_end': match['end'],
                         'match_text': match['text'],
-                        'context_before': self.get_context_before(lines, line_num - 1, 50),
-                        'context_after': self.get_context_after(lines, line_num - 1, 50)
+                        'context_before': self.get_context_before(lines, line_index, 50),
+                        'context_after': self.get_context_after(lines, line_index, 50)
                     }
                     
                     self.search_result.emit(result)
@@ -175,6 +191,24 @@ class SearchThread(QThread):
                 
         return context.lstrip()
         
+    def get_chapter_info(self, line_num):
+        """获取指定行号所在的章节信息"""
+        if not self.chapters:
+            return {'chapter': 0, 'title': '未找到章节'}
+            
+        # 查找当前行所在的章节
+        current_chapter = 0
+        chapter_title = '未找到章节'
+        
+        for i, chapter in enumerate(self.chapters):
+            if line_num >= chapter['line_number']:
+                current_chapter = i + 1
+                chapter_title = chapter['title']
+            else:
+                break
+        
+        return {'chapter': current_chapter, 'title': chapter_title}
+        
     def cancel(self):
         """取消搜索"""
         self.is_cancelled = True
@@ -186,10 +220,11 @@ class SearchWindow(QDialog):
     # 定义信号
     search_result_selected = pyqtSignal(int)  # 搜索结果选择信号，参数为行号
     
-    def __init__(self, file_path, title, parent=None):
+    def __init__(self, file_path, title, current_line=0, parent=None):
         super().__init__(parent)
         self.file_path = file_path
         self.book_title = title
+        self.current_line = current_line  # 当前阅读位置的行号
         self.search_thread = None
         self.search_results = []  # 存储搜索结果
         self.current_page = 0     # 当前页码
@@ -271,19 +306,14 @@ class SearchWindow(QDialog):
             "    background-color: #f8f9fa;"
             "    border: 1px solid #dee2e6;"
             "    border-radius: 5px;"
-            "    padding: 10px;"
+            "    padding: 5px;"
             "}"
         )
         
         search_layout = QVBoxLayout(search_frame)
-        search_layout.setSpacing(10)
+        search_layout.setSpacing(5)
         
-        # 标题
-        formatted_title = self.format_book_title(self.book_title)
-        title_label = QLabel(f'在 {formatted_title} 中搜索')
-        title_label.setFont(QFont('Microsoft YaHei', 12, QFont.Bold))
-        title_label.setStyleSheet('color: #2c3e50; background: transparent; border: none;')
-        search_layout.addWidget(title_label)
+
         
         # 搜索输入区域
         input_layout = QHBoxLayout()
@@ -367,9 +397,19 @@ class SearchWindow(QDialog):
         self.regex_cb = QCheckBox('正则表达式')
         self.regex_cb.setFont(QFont('Microsoft YaHei', 9))
         
+        self.search_after_current_cb = QCheckBox('只搜索当前位置之后')
+        self.search_after_current_cb.setFont(QFont('Microsoft YaHei', 9))
+        # 如果当前行号大于0，说明有阅读位置，启用并默认勾选该选项
+        if self.current_line > 0:
+            self.search_after_current_cb.setEnabled(True)
+            self.search_after_current_cb.setChecked(True)
+        else:
+            self.search_after_current_cb.setEnabled(False)
+        
         options_layout.addWidget(self.case_sensitive_cb)
         options_layout.addWidget(self.whole_word_cb)
         options_layout.addWidget(self.regex_cb)
+        options_layout.addWidget(self.search_after_current_cb)
         options_layout.addStretch()
         
         search_layout.addLayout(options_layout)
@@ -626,13 +666,19 @@ class SearchWindow(QDialog):
         self.cancel_button.setVisible(True)
         self.results_stats.setText('正在搜索...')
         
+        # 确定搜索起始行
+        start_line = 1
+        if self.search_after_current_cb.isChecked() and self.search_after_current_cb.isEnabled():
+            start_line = self.current_line
+        
         # 创建搜索线程
         self.search_thread = SearchThread(
             self.file_path,
             keyword,
             self.case_sensitive_cb.isChecked(),
             self.whole_word_cb.isChecked(),
-            self.regex_cb.isChecked()
+            self.regex_cb.isChecked(),
+            start_line
         )
         
         # 连接信号
@@ -701,14 +747,17 @@ class SearchWindow(QDialog):
         for i in range(start_index, end_index):
             result = self.search_results[i]
             
-            # 创建显示文本
-            display_text = f"第 {result['line_number']} 行：{result['line_content'][:100]}"
+            # 创建显示文本，包含章节信息
+            if result['chapter'] > 0:
+                display_text = f"第 {result['chapter']} 章 - 第 {result['line_number']} 行：{result['line_content'][:100]}"
+            else:
+                display_text = f"第 {result['line_number']} 行：{result['line_content'][:100]}"
             if len(result['line_content']) > 100:
                 display_text += '...'
                 
             item = QListWidgetItem(display_text)
             item.setData(Qt.UserRole, result)  # 存储完整结果数据
-            item.setToolTip(f"匹配文本：{result['match_text']}")
+            item.setToolTip(f"匹配文本：{result['match_text']}\n章节：{result['chapter_title']}")
             
             self.results_list.addItem(item)
             
@@ -765,8 +814,22 @@ class SearchWindow(QDialog):
             
     def show_result_preview(self, result):
         """显示搜索结果预览"""
-        # 构建预览文本
-        preview_text = f"""位置：第 {result['line_number']} 行
+        # 构建预览文本，包含章节信息
+        if result['chapter'] > 0:
+            preview_text = f"""章节：第 {result['chapter']} 章 - {result['chapter_title']}
+位置：第 {result['line_number']} 行
+匹配文本：{result['match_text']}
+
+--- 前文 ---
+{result['context_before']}
+
+--- 匹配行 ---
+{result['line_content']}
+
+--- 后文 ---
+{result['context_after']}"""
+        else:
+            preview_text = f"""位置：第 {result['line_number']} 行
 匹配文本：{result['match_text']}
 
 --- 前文 ---

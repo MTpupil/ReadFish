@@ -93,6 +93,9 @@ class ReaderWindow(QWidget):
         # 是否恢复阅读位置的标志
         self.should_restore_position = restore_position
         
+        # 临时固定显示标志
+        self.is_temporarily_fixed = False
+        
         self.init_ui()
         self.prepare_text_content()  # 准备文本内容
         self.load_config()
@@ -729,6 +732,10 @@ class ReaderWindow(QWidget):
             # 只启用按键显示：按键被按下就显示
             should_show = self.is_key_pressed
         # 如果都没启用，默认显示
+        
+        # 如果临时固定显示标志为True，强制显示
+        if self.is_temporarily_fixed:
+            should_show = True
             
         # 在显示控制模式下，窗口处于显示状态时切换为小圆点光标
         self.apply_cursor_style(use_dot=(should_show and (self.hover_to_show or self.key_to_show)))
@@ -989,7 +996,7 @@ class ReaderWindow(QWidget):
         
         # 退出选项
         exit_action = QAction('退出', self)
-        exit_action.triggered.connect(self.close)
+        exit_action.triggered.connect(QApplication.quit)
         menu.addAction(exit_action)
         
         # 显示菜单
@@ -1124,10 +1131,17 @@ class ReaderWindow(QWidget):
             return
             
         try:
-            # 创建或显示搜索窗口
+            # 获取当前阅读位置（行号）
+            current_line = self.current_line_index + 1  # 转换为1基索引
+            
+            # 创建或显示搜索窗口，传递当前阅读位置
             if self.search_window is None:
-                self.search_window = SearchWindow(self.file_path, self.title, self)
+                self.search_window = SearchWindow(self.file_path, self.title, current_line, self)
                 self.search_window.search_result_selected.connect(self.goto_search_result)
+            else:
+                # 更新搜索窗口的当前位置
+                self.search_window.current_line = current_line
+                self.search_window.search_after_current_cb.setEnabled(current_line > 0)
                 
             self.search_window.show()
             self.search_window.raise_()
@@ -1135,7 +1149,6 @@ class ReaderWindow(QWidget):
             
         except Exception as e:
             ToastManager.show_error(f'打开搜索窗口时发生错误：{str(e)}', self)
-            
     def goto_search_result(self, line_number):
         """跳转到搜索结果位置"""
         try:
@@ -1320,6 +1333,26 @@ class ReaderWindow(QWidget):
             else:
                 # 执行程序退出
                 QApplication.quit()
+        # Ctrl+F 打开搜索窗口
+        elif event.key() == Qt.Key_F and event.modifiers() == Qt.ControlModifier:
+            # 快捷键打开搜索窗口
+            self.show_search_window()
+        # Ctrl+I 打开设置窗口
+        elif event.key() == Qt.Key_I and event.modifiers() == Qt.ControlModifier:
+            # 快捷键打开设置窗口
+            self.show_config_window()
+        # Ctrl+` 临时固定显示阅读器
+        elif event.key() == Qt.Key_QuoteLeft and event.modifiers() == Qt.ControlModifier:
+            # 切换临时固定显示状态
+            self.is_temporarily_fixed = not self.is_temporarily_fixed
+            if self.is_temporarily_fixed:
+                # 临时固定，保持显示
+                self.content_visible = True
+                self.show()
+            else:
+                # 取消临时固定，立即隐藏阅读器
+                self.content_visible = False
+                self.hide()
         # 上键翻页
         elif event.key() == Qt.Key_Up:
             if content_visible_now:

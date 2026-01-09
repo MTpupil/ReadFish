@@ -228,26 +228,43 @@ def create_release_package():
     
     # 创建发布目录
     if os.path.exists(release_dir):
-        shutil.rmtree(release_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(release_dir, ignore_errors=True)
+            # 等待一下确保删除完成
+            time.sleep(1)
+        except Exception as e:
+            print_warning(f"清理发布目录失败: {str(e)}")
     
-    os.makedirs(release_dir, exist_ok=True)
-    print_success(f"创建发布目录: {release_dir}")
+    try:
+        os.makedirs(release_dir, exist_ok=True)
+        print_success(f"创建发布目录: {release_dir}")
+    except Exception as e:
+        print_error(f"创建发布目录失败: {str(e)}")
+        return False
     
     # 复制可执行文件
     exe_src = os.path.join('dist', 'ReadFish.exe')
     exe_dst = os.path.join(release_dir, 'ReadFish.exe')
     
     if os.path.exists(exe_src):
-        shutil.copy2(exe_src, exe_dst)
-        print_success("复制可执行文件")
+        try:
+            shutil.copy2(exe_src, exe_dst)
+            print_success("复制可执行文件")
+        except Exception as e:
+            print_warning(f"复制可执行文件失败: {str(e)}")
+            # 继续执行，不中断打包流程
     
     # 复制其他文件
     files_to_copy = ['README.md', 'LICENSE.txt']
     
     for file_name in files_to_copy:
         if os.path.exists(file_name):
-            shutil.copy2(file_name, os.path.join(release_dir, file_name))
-            print_success(f"复制文件: {file_name}")
+            try:
+                shutil.copy2(file_name, os.path.join(release_dir, file_name))
+                print_success(f"复制文件: {file_name}")
+            except Exception as e:
+                print_warning(f"复制文件 {file_name} 失败: {str(e)}")
+                # 继续执行，不中断打包流程
     
     # 创建使用说明
     usage_text = """ReadFish 使用说明
@@ -256,15 +273,20 @@ def create_release_package():
 1. 双击 ReadFish.exe 启动程序
 2. 首次使用时会要求选择电子书目录
 3. 支持的格式: TXT, EPUB, PDF 等
-4. 使用 Ctrl+O 打开文件，Ctrl+B 管理书签
+4. 使用 Ctrl+F 打开搜索窗口
+5. 使用 Ctrl+I 打开设置窗口
+6. 使用 Ctrl+` 临时固定/取消固定阅读器
 
 更多信息请查看 README.md 文件。
 """
     
     usage_file = os.path.join(release_dir, '使用说明.txt')
-    with open(usage_file, 'w', encoding='utf-8') as f:
-        f.write(usage_text)
-    print_success("创建使用说明文件")
+    try:
+        with open(usage_file, 'w', encoding='utf-8') as f:
+            f.write(usage_text)
+        print_success("创建使用说明文件")
+    except Exception as e:
+        print_warning(f"创建使用说明文件失败: {str(e)}")
     
     print_success(f"发布包已创建在: {release_dir}")
     return True

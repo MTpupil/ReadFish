@@ -137,15 +137,16 @@ class TableOfContents:
                     pattern_name = f"模式{i+1}"
                     matched_patterns[pattern_name] = matched_patterns.get(pattern_name, 0) + 1
                     
-                    logging.info(f"找到章节 [{line_num}行]: {line_stripped} (级别: {level}, 模式: {pattern_name})")
+                    # 仅在调试模式下输出章节日志，避免影响搜索效率
+                    # logging.info(f"找到章节 [{line_num}行]: {line_stripped} (级别: {level}, 模式: {pattern_name})")
                     break
                     
             char_position += len(line) + 1
             
-            # 限制章节数量，避免解析过多内容
-            if len(chapters) >= max_chapters:
-                logging.warning(f"达到最大章节数量限制 {max_chapters}，停止解析")
-                break
+            # 取消章节数量限制，支持长篇小说
+            # if len(chapters) >= max_chapters:
+            #     logging.warning(f"达到最大章节数量限制 {max_chapters}，停止解析")
+            #     break
         
         logging.info(f"初步解析完成，找到 {len(chapters)} 个章节")
         logging.info(f"匹配模式统计: {matched_patterns}")
