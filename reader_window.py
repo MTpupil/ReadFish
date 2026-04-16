@@ -1591,13 +1591,20 @@ class ReaderWindow(QWidget):
             if backquote_state and ctrl_state:
                 # 只在按键按下的瞬间处理，避免重复触发
                 if not getattr(self, '_hotkey_was_pressed', False):
-                    # 无论是否有焦点，只要是固定状态，就取消固定并隐藏窗口
+                    # 按照要求的逻辑执行：
+                    # 1. 如果flag是true，直接取消固定并隐藏
                     if self.is_temporarily_fixed:
                         self.is_temporarily_fixed = False
                         self.content_visible = False
                         self.hide()
+                    else:
+                        # 2. 如果flag是false，检查是否有焦点，有焦点就固定
+                        if self.hasFocus():
+                            self.is_temporarily_fixed = True
+                            self.content_visible = True
+                            self.show()
                     
-                    # 标记按键已按下
+                    # 标记按键已按下，避免重复触发
                     self._hotkey_was_pressed = True
             else:
                 # 按键已释放，重置标记
@@ -1720,20 +1727,10 @@ class ReaderWindow(QWidget):
         elif event.key() == Qt.Key_I and event.modifiers() == Qt.ControlModifier:
             # 快捷键打开设置窗口
             self.show_config_window()
-        # Ctrl+` 临时固定显示阅读器
+        # Ctrl+` 临时固定显示阅读器 - 已移至全局热键检测，此处不再处理
         elif event.key() == Qt.Key_QuoteLeft and event.modifiers() == Qt.ControlModifier:
-            if self.is_temporarily_fixed:
-                # 如果已经固定，直接取消固定并隐藏，无需焦点
-                self.is_temporarily_fixed = False
-                self.content_visible = False
-                self.hide()
-            else:
-                # 固定时需要焦点
-                if self.hasFocus():
-                    # 临时固定，保持显示
-                    self.is_temporarily_fixed = True
-                    self.content_visible = True
-                    self.show()
+            # 直接返回，不做处理，避免与全局热键冲突
+            return
         # Ctrl+E 显示章节信息和进度悬浮窗
         elif event.key() == Qt.Key_E and event.modifiers() == Qt.ControlModifier:
             # 显示悬浮窗
