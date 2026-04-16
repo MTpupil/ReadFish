@@ -5,10 +5,83 @@ EPUB文件工具模块
 """
 
 import os
+import re
 import zipfile
-import xml.etree.ElementTree as ET
 from typing import Optional, Tuple
+from html import unescape
+from html.parser import HTMLParser
 from ebooklib import epub
+
+
+class EpubHtmlTextExtractor(HTMLParser):
+    """
+    EPUB HTML 文本提取器
+    保留段落/标题等块级标签换行，避免正文全部挤成一行。
+    """
+
+    BLOCK_TAGS = {
+        'address', 'article', 'aside', 'blockquote', 'body', 'caption', 'dd',
+        'div', 'dl', 'dt', 'figcaption', 'figure', 'footer', 'form',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main',
+        'nav', 'ol', 'p', 'pre', 'section', 'table', 'tbody', 'td', 'tfoot',
+        'th', 'thead', 'tr', 'ul'
+    }
+    LINE_BREAK_TAGS = {'br'}
+    SKIP_TAGS = {'script', 'style', 'svg', 'noscript'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in self.SKIP_TAGS:
+            self.skip_depth += 1
+            return
+
+        if self.skip_depth > 0:
+            return
+
+        if tag in self.BLOCK_TAGS or tag in self.LINE_BREAK_TAGS:
+            self._append_newline()
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in self.SKIP_TAGS:
+            self.skip_depth = max(0, self.skip_depth - 1)
+            return
+
+        if self.skip_depth > 0:
+            return
+
+        if tag in self.BLOCK_TAGS:
+            self._append_newline()
+
+    def handle_data(self, data):
+        if self.skip_depth > 0 or not data:
+            return
+
+        normalized = self._normalize_fragment(data)
+        if normalized:
+            self.parts.append(normalized)
+
+    def _append_newline(self):
+        if not self.parts:
+            return
+
+        if not self.parts[-1].endswith('\n'):
+            self.parts.append('\n')
+
+    @staticmethod
+    def _normalize_fragment(text: str) -> str:
+        text = text.replace('\xa0', ' ')
+        text = text.replace('\u00ad', '')
+        text = text.replace('\ufeff', '')
+        text = text.replace('\u200b', '')
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = re.sub(r'[ \t\f\v]+', ' ', text)
+        return text
 
 
 def read_epub_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
@@ -31,26 +104,12 @@ def read_epub_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
         # 使用ebooklib库读取EPUB文件
         book = epub.read_epub(file_path)
         
-        # 提取所有文本内容
-        text_content = []
-        
-        # 遍历所有项目（章节、内容等）
-        for item in book.get_items():
-            # 只处理文本类型的内容（HTML/XHTML）
-            if isinstance(item, epub.EpubHtml):
-                # 获取HTML内容
-                html_content = item.get_content().decode('utf-8')
-                
-                # 简单提取文本内容（去除HTML标签）
-                # 这里使用简单的文本提取，可以根据需要改进
-                text = extract_text_from_html(html_content)
-                if text.strip():
-                    text_content.append(text)
+        # 优先按照阅读顺序提取正文，目录定位会更稳定。
+        text_content = extract_all_text_from_epub(book)
         
         # 如果没有提取到内容，尝试其他方法
         if not text_content:
-            # 尝试直接读取所有文本内容
-            text_content = extract_all_text_from_epub(book)
+            text_content = extract_text_from_all_items(book)
         
         # 合并所有文本内容
         full_text = '\n\n'.join(text_content)
@@ -75,35 +134,25 @@ def extract_text_from_html(html_content: str) -> str:
         提取的纯文本
     """
     try:
-        # 简单的HTML标签去除
-        import re
-        
-        # 移除脚本和样式标签
-        html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL)
-        html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL)
-        
-        # 移除HTML标签
-        text = re.sub(r'<[^>]+>', ' ', html_content)
-        
-        # 处理HTML实体
-        text = text.replace('&nbsp;', ' ')
-        text = text.replace('&amp;', '&')
-        text = text.replace('&lt;', '<')
-        text = text.replace('&gt;', '>')
-        text = text.replace('&quot;', '"')
-        text = text.replace('&apos;', "'")
-        
-        # 合并多个空白字符
-        text = re.sub(r'\s+', ' ', text)
-        
-        # 去除首尾空白
-        text = text.strip()
-        
-        return text
+        extractor = EpubHtmlTextExtractor()
+        extractor.feed(_decode_html_entities(html_content))
+        extractor.close()
+
+        return _clean_extracted_text(''.join(extractor.parts))
         
     except Exception:
-        # 如果解析失败，返回原始内容
-        return html_content
+        # 回退到正则方案，避免个别异常HTML导致完全无法读取。
+        html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        html_content = re.sub(r'<br\s*/?>', '\n', html_content, flags=re.IGNORECASE)
+        html_content = re.sub(
+            r'</?(p|div|section|article|h[1-6]|li|tr|blockquote|pre)[^>]*>',
+            '\n',
+            html_content,
+            flags=re.IGNORECASE
+        )
+        text = re.sub(r'<[^>]+>', ' ', html_content)
+        return _clean_extracted_text(_decode_html_entities(text))
 
 
 def extract_all_text_from_epub(book) -> list:
@@ -127,24 +176,88 @@ def extract_all_text_from_epub(book) -> list:
             # 获取对应的项目
             item = book.get_item_with_id(spine_id)
             if item and isinstance(item, epub.EpubHtml):
-                html_content = item.get_content().decode('utf-8')
+                html_content = _decode_item_content(item)
                 text = extract_text_from_html(html_content)
                 if text.strip():
                     text_content.append(text)
         
     except Exception:
-        # 如果按照spine顺序提取失败，尝试遍历所有项目
-        for item in book.get_items():
-            if isinstance(item, epub.EpubHtml):
-                try:
-                    html_content = item.get_content().decode('utf-8')
-                    text = extract_text_from_html(html_content)
-                    if text.strip():
-                        text_content.append(text)
-                except Exception:
-                    continue
+        return extract_text_from_all_items(book)
     
     return text_content
+
+
+def extract_text_from_all_items(book) -> list:
+    """遍历所有正文项目提取文本，作为spine解析失败时的兜底方案。"""
+    text_content = []
+
+    for item in book.get_items():
+        if isinstance(item, epub.EpubHtml):
+            try:
+                html_content = _decode_item_content(item)
+                text = extract_text_from_html(html_content)
+                if text.strip():
+                    text_content.append(text)
+            except Exception:
+                continue
+
+    return text_content
+
+
+def _decode_item_content(item) -> str:
+    """安全解码 EPUB 文本项目，兼容少量非标准编码声明。"""
+    raw_content = item.get_content()
+
+    if isinstance(raw_content, bytes):
+        for encoding in ('utf-8', 'utf-8-sig', 'gbk'):
+            try:
+                return raw_content.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return raw_content.decode('utf-8', errors='ignore')
+
+    return str(raw_content)
+
+
+def _decode_html_entities(text: str) -> str:
+    """
+    多轮解码 HTML 实体。
+    兼容 `&#13;` 和 `&amp;#13;` 这类被重复转义的内容。
+    """
+    decoded = text
+    for _ in range(3):
+        new_value = unescape(decoded)
+        if new_value == decoded:
+            break
+        decoded = new_value
+    return decoded
+
+
+def _clean_extracted_text(text: str) -> str:
+    """清洗提取后的文本，保留自然段并去掉控制字符。"""
+    text = _decode_html_entities(text)
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = text.replace('\xa0', ' ')
+    text = text.replace('\ufeff', '')
+    text = text.replace('\u200b', '')
+    text = text.replace('\u00ad', '')
+
+    # 保留换行，压缩每行内部的空白，避免章节标题和正文被挤成一团。
+    lines = [re.sub(r'\s+', ' ', line).strip() for line in text.split('\n')]
+
+    cleaned_lines = []
+    last_blank = True
+    for line in lines:
+        if line:
+            cleaned_lines.append(line)
+            last_blank = False
+        elif not last_blank:
+            cleaned_lines.append('')
+            last_blank = True
+
+    cleaned_text = '\n'.join(cleaned_lines).strip()
+    cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
+    return cleaned_text
 
 
 def is_epub_file(file_path: str) -> bool:
