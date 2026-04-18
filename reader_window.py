@@ -241,6 +241,17 @@ class ReaderWindow(QWidget):
         # 章节信息悬浮窗
         self.progress_tooltip = None
         
+        # 自动阅读相关
+        self.auto_reading = False  # 是否正在自动阅读
+        self.auto_read_paused = False  # 是否暂停
+        self.auto_read_timer = None  # 自动阅读定时器
+        self.auto_read_was_paused_by_hide = False  # 标记是否因窗口隐藏而暂停
+        self.contents_window = None  # 目录窗口引用
+        
+        # 初始化自动阅读定时器
+        self.auto_read_timer = QTimer(self)
+        self.auto_read_timer.timeout.connect(self.auto_read_step)
+        
         # 安装全局事件过滤器，用于监听Ctrl+`组合键，无论是否有焦点
         self.install_global_event_filter()
         
@@ -428,12 +439,12 @@ class ReaderWindow(QWidget):
         self.current_line_index = 0
         self.current_char_offset = 0  # 当前行内的字符偏移量，用于长行分页
         
-
         
     def prepare_multi_line_mode(self):
         """准备多行模式：保持原内容格式，按行分割"""
         # 多行模式下，按原文本的换行符分割成行
         self.text_lines = self.full_text.split('\n')
+        
         # 确保至少有一行
         if not self.text_lines:
             self.text_lines = ['（无内容）']
@@ -563,6 +574,7 @@ class ReaderWindow(QWidget):
         """向上翻页"""
         config = self.config_manager.get_config()
         single_line_mode = config.get('single_line_mode', False)
+        remove_empty_lines = config.get('remove_empty_lines', False)
         
         if single_line_mode:
             # 单行模式：支持长行分页
@@ -578,23 +590,39 @@ class ReaderWindow(QWidget):
                 self.update_text_display()
             # 如果已经在当前行的开头，则跳到上一行的末尾
             elif self.current_line_index > 0:
-                self.current_line_index -= 1
-                prev_line = self.text_lines[self.current_line_index]
-                # 重新计算上一行的可见字符数
-                visible_chars = self.calculate_visible_chars(prev_line)
-                # 计算上一行需要多少页显示完
-                if len(prev_line) > visible_chars:
-                    # 跳到上一行的最后一页
-                    pages_needed = (len(prev_line) + visible_chars - 1) // visible_chars
-                    self.current_char_offset = (pages_needed - 1) * visible_chars
-                else:
-                    self.current_char_offset = 0
-                self.update_text_display()
+                # 跳过空行（如果启用）
+                target_index = self.current_line_index - 1
+                if remove_empty_lines:
+                    while target_index >= 0 and self.text_lines[target_index].strip() == '':
+                        target_index -= 1
+                
+                if target_index >= 0:
+                    self.current_line_index = target_index
+                    prev_line = self.text_lines[self.current_line_index]
+                    # 重新计算上一行的可见字符数
+                    visible_chars = self.calculate_visible_chars(prev_line)
+                    # 计算上一行需要多少页显示完
+                    if len(prev_line) > visible_chars:
+                        # 跳到上一行的最后一页
+                        pages_needed = (len(prev_line) + visible_chars - 1) // visible_chars
+                        self.current_char_offset = (pages_needed - 1) * visible_chars
+                    else:
+                        self.current_char_offset = 0
+                    self.update_text_display()
         else:
             # 多行模式：向上翻页
             if self.current_line_index > 0:
                 self.current_line_index -= self.lines_per_page
                 self.current_line_index = max(0, self.current_line_index)
+                
+                # 跳过空行（如果启用）
+                if remove_empty_lines:
+                    # 向上查找非空行
+                    target_index = self.current_line_index
+                    while target_index > 0 and self.text_lines[target_index].strip() == '':
+                        target_index -= 1
+                    self.current_line_index = target_index
+                
                 self.update_text_display()
         
         # 更新阅读历史记录
@@ -604,6 +632,7 @@ class ReaderWindow(QWidget):
         """向下翻页"""
         config = self.config_manager.get_config()
         single_line_mode = config.get('single_line_mode', False)
+        remove_empty_lines = config.get('remove_empty_lines', False)
         
         if single_line_mode:
             # 单行模式：支持长行分页
@@ -620,15 +649,31 @@ class ReaderWindow(QWidget):
                 self.update_text_display()
             # 如果当前行已经显示完，跳到下一行的开头
             elif self.current_line_index < len(self.text_lines) - 1:
-                self.current_line_index += 1
-                self.current_char_offset = 0
-                self.update_text_display()
+                # 跳过空行（如果启用）
+                target_index = self.current_line_index + 1
+                if remove_empty_lines:
+                    while target_index < len(self.text_lines) and self.text_lines[target_index].strip() == '':
+                        target_index += 1
+                
+                if target_index < len(self.text_lines):
+                    self.current_line_index = target_index
+                    self.current_char_offset = 0
+                    self.update_text_display()
         else:
             # 多行模式：向下翻页
             max_start_line = max(0, len(self.text_lines) - self.lines_per_page)
             if self.current_line_index < max_start_line:
                 self.current_line_index += self.lines_per_page
                 self.current_line_index = min(self.current_line_index, max_start_line)
+                
+                # 跳过空行（如果启用）
+                if remove_empty_lines:
+                    # 向下查找非空行
+                    target_index = self.current_line_index
+                    while target_index < max_start_line and self.text_lines[target_index].strip() == '':
+                        target_index += 1
+                    self.current_line_index = target_index
+                
                 self.update_text_display()
         
         # 更新阅读历史记录
@@ -891,6 +936,16 @@ class ReaderWindow(QWidget):
         if self.is_temporarily_fixed:
             should_show = True
             
+        # 自动阅读与窗口隐藏/显示联动
+        if should_show != self.content_visible:
+            if not should_show and self.auto_reading and not self.auto_read_paused:
+                # 窗口要隐藏，且正在自动阅读且未暂停，则暂停并标记
+                self.pause_auto_read()
+                self.auto_read_was_paused_by_hide = True
+            elif should_show and self.auto_reading and self.auto_read_was_paused_by_hide:
+                # 窗口要显示，且之前因隐藏而暂停，则恢复
+                self.resume_auto_read()
+        
         # 在显示控制模式下，窗口处于显示状态时切换为小圆点光标
         self.apply_cursor_style(use_dot=(should_show and (self.hover_to_show or self.key_to_show)))
 
@@ -1121,6 +1176,20 @@ class ReaderWindow(QWidget):
             search_action = QAction('搜索', self)
             search_action.triggered.connect(self.show_search_window)
             menu.addAction(search_action)
+            
+            # 查看目录
+            contents_action = QAction('查看目录', self)
+            contents_action.triggered.connect(self.show_contents_window)
+            menu.addAction(contents_action)
+            
+            # 分隔线
+            menu.addSeparator()
+            
+            # 自动阅读
+            auto_read_text = '停止自动阅读' if self.auto_reading else '开始自动阅读'
+            auto_read_action = QAction(auto_read_text, self)
+            auto_read_action.triggered.connect(self.toggle_auto_read)
+            menu.addAction(auto_read_action)
             
             # 分隔线
             menu.addSeparator()
@@ -1652,6 +1721,9 @@ class ReaderWindow(QWidget):
     
     def closeEvent(self, event):
         """窗口关闭事件"""
+        # 停止自动阅读定时器
+        self.stop_auto_read()
+        
         # 停止定时器
         if hasattr(self, 'mouse_check_timer'):
             self.mouse_check_timer.stop()
@@ -1731,17 +1803,34 @@ class ReaderWindow(QWidget):
         elif event.key() == Qt.Key_QuoteLeft and event.modifiers() == Qt.ControlModifier:
             # 直接返回，不做处理，避免与全局热键冲突
             return
+        # Ctrl+A 开始/关闭自动阅读
+        elif event.key() == Qt.Key_A and event.modifiers() == Qt.ControlModifier:
+            self.toggle_auto_read()
         # Ctrl+E 显示章节信息和进度悬浮窗
         elif event.key() == Qt.Key_E and event.modifiers() == Qt.ControlModifier:
             # 显示悬浮窗
             self.show_progress_tooltip()
-        # 上键翻页
+        # 空格 - 暂停/恢复自动阅读（仅在自动阅读时有效）
+        elif event.key() == Qt.Key_Space and event.modifiers() == Qt.NoModifier:
+            if self.auto_reading:
+                if self.auto_read_paused:
+                    self.resume_auto_read()
+                else:
+                    self.pause_auto_read()
+            else:
+                # 不是自动阅读状态，按原逻辑处理
+                super().keyPressEvent(event)
+        # 上键 - 翻页或加快自动阅读速度
         elif event.key() == Qt.Key_Up:
-            if content_visible_now:
+            if self.auto_reading:
+                self.increase_auto_read_speed()
+            elif content_visible_now:
                 self.page_up()
-        # 下键翻页
+        # 下键 - 翻页或减慢自动阅读速度
         elif event.key() == Qt.Key_Down:
-            if content_visible_now:
+            if self.auto_reading:
+                self.decrease_auto_read_speed()
+            elif content_visible_now:
                 self.page_down()
         # PageUp/PageDown 支持 - 常见期望的翻页键
         elif event.key() == Qt.Key_PageUp:
@@ -2093,4 +2182,167 @@ class ReaderWindow(QWidget):
                 
         except Exception as e:
             print(f"[调试] 跳转到行号时出错: {e}")
+            pass
+
+    def toggle_auto_read(self):
+        """切换自动阅读状态（开始/停止）"""
+        if self.auto_reading:
+            self.stop_auto_read()
+        else:
+            self.start_auto_read()
+
+    def start_auto_read(self):
+        """开始自动阅读"""
+        config = self.config_manager.get_config()
+        speed = config.get('auto_read_speed', 2.0)
+        
+        self.auto_reading = True
+        self.auto_read_paused = False
+        self.auto_read_was_paused_by_hide = False
+        
+        # 启动定时器
+        self.update_auto_read_timer()
+
+    def stop_auto_read(self):
+        """停止自动阅读"""
+        if self.auto_read_timer:
+            self.auto_read_timer.stop()
+        
+        self.auto_reading = False
+        self.auto_read_paused = False
+        self.auto_read_was_paused_by_hide = False
+
+    def pause_auto_read(self):
+        """暂停自动阅读"""
+        if self.auto_reading and not self.auto_read_paused:
+            if self.auto_read_timer:
+                self.auto_read_timer.stop()
+            self.auto_read_paused = True
+
+    def resume_auto_read(self):
+        """恢复自动阅读"""
+        if self.auto_reading and self.auto_read_paused:
+            self.auto_read_paused = False
+            self.auto_read_was_paused_by_hide = False
+            self.update_auto_read_timer()
+
+    def auto_read_step(self):
+        """自动翻页执行方法"""
+        if not self.auto_reading or self.auto_read_paused:
+            return
+        
+        # 保存当前位置，用于判断是否到达末尾
+        old_line_index = self.current_line_index
+        old_char_offset = getattr(self, 'current_char_offset', 0)
+        
+        # 执行翻页
+        self.page_down()
+        
+        # 检查是否到达末尾（位置没有变化）
+        if (self.current_line_index == old_line_index and 
+            getattr(self, 'current_char_offset', 0) == old_char_offset):
+            # 到达末尾，停止自动阅读
+            self.stop_auto_read()
+
+    def increase_auto_read_speed(self):
+        """加快自动阅读速度"""
+        config = self.config_manager.get_config()
+        current_speed = config.get('auto_read_speed', 2.0)
+        min_speed = config.get('auto_read_speed_min', 0.5)
+        step = config.get('auto_read_speed_step', 0.5)
+        
+        new_speed = max(min_speed, current_speed - step)
+        config['auto_read_speed'] = new_speed
+        self.config_manager.save_config(config)
+        
+        # 如果正在自动阅读，更新定时器
+        if self.auto_reading and not self.auto_read_paused:
+            self.update_auto_read_timer()
+        
+        # 如果配置窗口打开，刷新配置显示
+        if self.config_window and hasattr(self.config_window, 'refresh_config'):
+            self.config_window.refresh_config()
+
+    def decrease_auto_read_speed(self):
+        """减慢自动阅读速度"""
+        config = self.config_manager.get_config()
+        current_speed = config.get('auto_read_speed', 2.0)
+        max_speed = config.get('auto_read_speed_max', 10.0)
+        step = config.get('auto_read_speed_step', 0.5)
+        
+        new_speed = min(max_speed, current_speed + step)
+        config['auto_read_speed'] = new_speed
+        self.config_manager.save_config(config)
+        
+        # 如果正在自动阅读，更新定时器
+        if self.auto_reading and not self.auto_read_paused:
+            self.update_auto_read_timer()
+        
+        # 如果配置窗口打开，刷新配置显示
+        if self.config_window and hasattr(self.config_window, 'refresh_config'):
+            self.config_window.refresh_config()
+
+    def update_auto_read_timer(self):
+        """更新自动阅读定时器"""
+        if not self.auto_reading or self.auto_read_paused:
+            return
+        
+        config = self.config_manager.get_config()
+        speed = config.get('auto_read_speed', 2.0)
+        interval = int(speed * 1000)
+        
+        if self.auto_read_timer:
+            self.auto_read_timer.stop()
+            self.auto_read_timer.start(interval)
+
+    def show_contents_window(self):
+        """显示目录页面并自动定位到当前章节"""
+        if not self.file_path:
+            return
+        
+        try:
+            from contents_window import ContentsWindow
+            
+            # 构造书籍信息
+            book_info = {
+                'file_path': self.file_path,
+                'name': self.title,
+                'display_name': self.title
+            }
+            
+            # 获取当前阅读的行号（转换为1基）
+            current_line_number = self.current_line_index + 1
+            
+            # 创建目录窗口
+            if self.contents_window is None or not self.contents_window.isVisible():
+                self.contents_window = ContentsWindow(
+                    book_info, 
+                    current_line_number=current_line_number,
+                    parent=self
+                )
+                self.contents_window.chapter_selected.connect(self.goto_chapter_from_contents)
+                self.contents_window.finished.connect(lambda: setattr(self, 'contents_window', None))
+            else:
+                # 窗口已存在，更新当前行号
+                self.contents_window.current_line_number = current_line_number
+                # 如果目录已解析，重新高亮
+                if hasattr(self.contents_window, 'chapters') and self.contents_window.chapters:
+                    self.contents_window.highlight_current_chapter()
+            
+            self.contents_window.show()
+            self.contents_window.raise_()
+            self.contents_window.activateWindow()
+            
+        except Exception as e:
+            print(f"[调试] 打开目录窗口时出错: {e}")
+            pass
+
+    def goto_chapter_from_contents(self, chapter):
+        """从目录跳转到指定章节"""
+        try:
+            line_number = chapter.get('line_number', 1)
+            self.jump_to_line(line_number)
+            self.save_reading_position()
+        except Exception as e:
+            print(f"[调试] 跳转到章节时出错: {e}")
             pass

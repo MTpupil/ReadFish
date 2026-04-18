@@ -1938,8 +1938,17 @@ class MainWindow(_BaseMainWindow):
         """显示书籍目录"""
         from contents_window import ContentsWindow
         
+        # 获取当前阅读的行号（从历史记录中）
+        current_line_number = None
+        file_path = book_info.get('file_path')
+        if file_path:
+            reading_position = self.history_manager.get_reading_position(file_path)
+            if reading_position:
+                current_line_index = reading_position.get('current_line_index', 0)
+                current_line_number = current_line_index + 1  # 转换为1基
+        
         # 创建目录窗口
-        contents_window = ContentsWindow(book_info, self)
+        contents_window = ContentsWindow(book_info, current_line_number=current_line_number, parent=self)
         
         # 连接章节选择信号，使用 lambda 传递书籍信息
         contents_window.chapter_selected.connect(
@@ -1997,29 +2006,16 @@ class MainWindow(_BaseMainWindow):
         # 显示阅读器窗口
         reader.show()
         
-        # 使用 QTimer 延迟跳转到指定章节位置，确保窗口完全初始化后再跳转
-        from PyQt5.QtCore import QTimer
-        def delayed_jump():
-            print(f"[调试] 延迟跳转函数被调用")
-            # 确保阅读器窗口已经完全显示和初始化
-            if reader.isVisible() and hasattr(reader, 'text_lines') and reader.text_lines:
-                print(f"[调试] 阅读器窗口已初始化，开始执行跳转")
-                if 'char_position' in chapter_info:
-                    print(f"[调试] 使用字符位置跳转: {chapter_info['char_position']}")
-                    reader.jump_to_position(chapter_info['char_position'])
-                elif 'line_number' in chapter_info:
-                    print(f"[调试] 使用行号跳转: {chapter_info['line_number']}")
-                    reader.jump_to_line(chapter_info['line_number'])
-                else:
-                    print(f"[调试] 跳转失败: 章节信息中没有位置数据")
-            else:
-                print(f"[调试] 阅读器窗口还未完全初始化，再次延迟")
-                print(f"[调试] 窗口可见性: {reader.isVisible()}, 有文本行: {hasattr(reader, 'text_lines') and reader.text_lines}")
-                # 如果窗口还没有完全初始化，再延迟一点时间
-                QTimer.singleShot(200, delayed_jump)
-        
-        print(f"[调试] 设置延迟跳转定时器，500毫秒后执行")
-        QTimer.singleShot(500, delayed_jump)  # 延迟500毫秒执行跳转，确保窗口完全初始化
+        # 立即跳转到指定章节位置
+        print(f"[调试] 立即执行跳转")
+        if 'char_position' in chapter_info:
+            print(f"[调试] 使用字符位置跳转: {chapter_info['char_position']}")
+            reader.jump_to_position(chapter_info['char_position'])
+        elif 'line_number' in chapter_info:
+            print(f"[调试] 使用行号跳转: {chapter_info['line_number']}")
+            reader.jump_to_line(chapter_info['line_number'])
+        else:
+            print(f"[调试] 跳转失败: 章节信息中没有位置数据")
         
         # 保存阅读器窗口引用，以便后续管理
         self.reader_window = reader

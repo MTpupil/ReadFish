@@ -1,21 +1,87 @@
 # -*- coding: utf-8 -*-
 """
-EPUB文件工具模块
-提供EPUB文件解析功能，提取文本内容
+EPUB文件工具模块 - 性能优化版
+提供EPUB文件解析功能，提取文本内容，并添加缓存机制
 """
 
 import os
 import re
 import zipfile
+import hashlib
+import json
 from typing import Optional, Tuple
 from html import unescape
 from html.parser import HTMLParser
 from ebooklib import epub
 
 
+class EpubCache:
+    """EPUB 缓存管理器"""
+    
+    def __init__(self, cache_dir='.epub_cache'):
+        self.cache_dir = cache_dir
+        if not os.path.exists(cache_dir):
+            try:
+                os.makedirs(cache_dir, exist_ok=True)
+            except Exception:
+                self.cache_dir = None
+    
+    def _get_file_hash(self, file_path: str) -> str:
+        """计算文件的哈希值（用于缓存键）"""
+        try:
+            # 获取文件修改时间和大小，避免计算大文件的完整哈希
+            stat = os.stat(file_path)
+            file_info = f"{file_path}_{stat.st_mtime}_{stat.st_size}"
+            return hashlib.md5(file_info.encode('utf-8')).hexdigest()
+        except Exception:
+            # 如果失败，使用路径作为后备
+            return hashlib.md5(file_path.encode('utf-8')).hexdigest()
+    
+    def _get_cache_path(self, file_path: str) -> Optional[str]:
+        """获取缓存文件路径"""
+        if not self.cache_dir:
+            return None
+        file_hash = self._get_file_hash(file_path)
+        return os.path.join(self.cache_dir, f"{file_hash}.cache")
+    
+    def get(self, file_path: str) -> Optional[dict]:
+        """从缓存获取内容"""
+        cache_path = self._get_cache_path(file_path)
+        if not cache_path or not os.path.exists(cache_path):
+            return None
+        
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data
+        except Exception:
+            return None
+    
+    def set(self, file_path: str, content: str, title: Optional[str] = None):
+        """保存内容到缓存"""
+        cache_path = self._get_cache_path(file_path)
+        if not cache_path:
+            return
+        
+        try:
+            cache_data = {
+                'content': content,
+                'title': title,
+                'version': 1
+            }
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+
+# 全局缓存实例
+_epub_cache = EpubCache()
+
+
 class EpubHtmlTextExtractor(HTMLParser):
     """
-    EPUB HTML 文本提取器
+    EPUB HTML 文本提取器 - 性能优化版
     保留段落/标题等块级标签换行，避免正文全部挤成一行。
     """
 
@@ -86,7 +152,7 @@ class EpubHtmlTextExtractor(HTMLParser):
 
 def read_epub_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    读取EPUB文件并提取文本内容
+    读取EPUB文件并提取文本内容 - 性能优化版
     
     Args:
         file_path: EPUB文件路径
@@ -99,6 +165,11 @@ def read_epub_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
     
     if not file_path.lower().endswith('.epub'):
         return None, "文件不是EPUB格式"
+    
+    # 优先从缓存获取
+    cached_data = _epub_cache.get(file_path)
+    if cached_data and 'content' in cached_data:
+        return cached_data['content'], None
     
     try:
         # 使用ebooklib库读取EPUB文件
@@ -117,6 +188,14 @@ def read_epub_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
         if not full_text.strip():
             return None, "EPUB文件中没有找到可读的文本内容"
         
+        # 获取书籍标题
+        title = None
+        if book.get_metadata('DC', 'title'):
+            title = book.get_metadata('DC', 'title')[0][0]
+        
+        # 保存到缓存
+        _epub_cache.set(file_path, full_text, title)
+        
         return full_text, None
         
     except Exception as e:
@@ -125,7 +204,7 @@ def read_epub_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
 
 def extract_text_from_html(html_content: str) -> str:
     """
-    从HTML内容中提取纯文本
+    从HTML内容中提取纯文本 - 性能优化版
     
     Args:
         html_content: HTML内容字符串
@@ -157,7 +236,7 @@ def extract_text_from_html(html_content: str) -> str:
 
 def extract_all_text_from_epub(book) -> list:
     """
-    从EPUB书籍对象中提取所有文本内容
+    从EPUB书籍对象中提取所有文本内容 - 性能优化版
     
     Args:
         book: ebooklib.epub.EpubBook对象
@@ -298,7 +377,7 @@ def is_epub_file(file_path: str) -> bool:
 
 def get_epub_title(file_path: str) -> Optional[str]:
     """
-    获取EPUB文件的标题
+    获取EPUB文件的标题 - 性能优化版
     
     Args:
         file_path: EPUB文件路径
@@ -306,6 +385,11 @@ def get_epub_title(file_path: str) -> Optional[str]:
     Returns:
         书籍标题，如果获取失败返回None
     """
+    # 优先从缓存获取
+    cached_data = _epub_cache.get(file_path)
+    if cached_data and cached_data.get('title'):
+        return cached_data['title']
+    
     try:
         book = epub.read_epub(file_path)
         
@@ -313,6 +397,9 @@ def get_epub_title(file_path: str) -> Optional[str]:
         if book.get_metadata('DC', 'title'):
             title = book.get_metadata('DC', 'title')[0][0]
             if title:
+                # 如果缓存有内容，更新标题
+                if cached_data and 'content' in cached_data:
+                    _epub_cache.set(file_path, cached_data['content'], title)
                 return title
         
         # 如果元数据中没有标题，使用文件名（不含扩展名）

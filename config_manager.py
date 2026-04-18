@@ -61,7 +61,16 @@ class ConfigManager:
             # 光标设置（新增）
             'dot_cursor_size': 2,           # 圆点直径（像素）
             'dot_cursor_color': '#000000',  # 圆点颜色（十六进制）
-            'dot_cursor_opacity': 1.0       # 圆点透明度 (0.1 - 1.0)
+            'dot_cursor_opacity': 1.0,      # 圆点透明度 (0.1 - 1.0)
+            
+            # 自动阅读设置
+            'auto_read_speed': 2.0,          # 自动阅读速度（秒/页），默认 2 秒
+            'auto_read_speed_min': 0.5,      # 最小速度
+            'auto_read_speed_max': 10.0,     # 最大速度
+            'auto_read_speed_step': 0.5,     # 速度调整步长
+            
+            # 阅读显示设置
+            'remove_empty_lines': False        # 是否去除完全空行
         }
         
         # 当前配置
@@ -254,6 +263,11 @@ class ConfigManager:
 
         validated['page_up_keys'] = normalize_page_keys(validated.get('page_up_keys', []))
         validated['page_down_keys'] = normalize_page_keys(validated.get('page_down_keys', []))
+
+        # 验证自动阅读速度
+        min_speed = validated.get('auto_read_speed_min', 0.5)
+        max_speed = validated.get('auto_read_speed_max', 10.0)
+        validated['auto_read_speed'] = max(min_speed, min(max_speed, validated.get('auto_read_speed', 2.0)))
 
         return validated
         

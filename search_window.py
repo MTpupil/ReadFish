@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-全文搜索窗口 - 支持关键词搜索和结果显示
+全文搜索窗口 - 支持关键词搜索和结果显示 - 性能优化版
 """
 
 import os
@@ -22,7 +22,7 @@ from table_of_contents import TableOfContents
 
 
 class SearchThread(QThread):
-    """搜索线程 - 在后台执行搜索操作"""
+    """搜索线程 - 在后台执行搜索操作 - 性能优化版"""
     
     # 定义信号
     search_progress = pyqtSignal(int)  # 搜索进度信号
@@ -42,7 +42,7 @@ class SearchThread(QThread):
         self.chapters = []  # 存储章节信息
         
     def run(self):
-        """执行搜索"""
+        """执行搜索 - 性能优化版"""
         try:
             # 读取文件内容（支持TXT和EPUB）
             content, error_message = read_file_content(self.file_path)
@@ -54,9 +54,15 @@ class SearchThread(QThread):
             total_lines = len(lines)
             results_count = 0
             
-            # 解析章节信息
-            toc_parser = TableOfContents()
-            self.chapters = toc_parser.parse_contents(content)
+            # 快速检查：如果关键词不存在于文本中，直接返回
+            has_keyword = False
+            if not self.use_regex:
+                search_text = self.keyword if self.case_sensitive else self.keyword.lower()
+                content_check = content if self.case_sensitive else content.lower()
+                if search_text not in content_check:
+                    self.search_progress.emit(100)
+                    self.search_finished.emit(0)
+                    return
             
             # 准备搜索模式
             search_pattern = self.prepare_search_pattern()
@@ -66,17 +72,35 @@ class SearchThread(QThread):
                 
             # 逐行搜索，从start_line开始
             start_index = max(0, self.start_line - 1)  # 转换为0基索引
+            
+            # 性能优化：只在需要时解析章节信息
+            need_chapters = self._need_chapter_info()
+            
+            if need_chapters:
+                toc_parser = TableOfContents()
+                self.chapters = toc_parser.parse_contents(content)
+            
+            # 性能优化：批量处理和减少进度更新
+            progress_update_interval = max(100, total_lines // 100)  # 至少100行或1%
+            
             for line_num in range(self.start_line, total_lines + 1):
                 if self.is_cancelled:
                     break
                     
-                # 更新进度
-                if line_num % 100 == 0:  # 每100行更新一次进度
+                # 更新进度 - 减少更新频率
+                if line_num % progress_update_interval == 0:
                     progress = int(((line_num - self.start_line + 1) / (total_lines - self.start_line + 1)) * 100) if (total_lines - self.start_line + 1) > 0 else 100
                     self.search_progress.emit(progress)
                     
                 line_index = line_num - 1
                 line = lines[line_index]
+                
+                # 快速检查：先做简单的字符串包含检查，避免不必要的正则匹配
+                if not self.use_regex:
+                    search_text = self.keyword if self.case_sensitive else self.keyword.lower()
+                    line_check = line if self.case_sensitive else line.lower()
+                    if search_text not in line_check:
+                        continue
                 
                 # 搜索匹配
                 matches = self.find_matches_in_line(line, search_pattern)
@@ -86,7 +110,7 @@ class SearchThread(QThread):
                         break
                         
                     # 获取当前行所在的章节
-                    chapter_info = self.get_chapter_info(line_num)
+                    chapter_info = self.get_chapter_info(line_num) if need_chapters else {'chapter': 0, 'title': '未找到章节'}
                     
                     # 创建搜索结果
                     result = {
@@ -97,18 +121,18 @@ class SearchThread(QThread):
                         'match_start': match['start'],
                         'match_end': match['end'],
                         'match_text': match['text'],
-                        'context_before': self.get_context_before(lines, line_index, 50),
-                        'context_after': self.get_context_after(lines, line_index, 50)
+                        'context_before': self.get_context_before_fast(lines, line_index, 50) if need_chapters else '',
+                        'context_after': self.get_context_after_fast(lines, line_index, 50) if need_chapters else ''
                     }
                     
                     self.search_result.emit(result)
                     results_count += 1
                     
                     # 限制结果数量，避免内存溢出
-                    if results_count >= 10000:  # 最多显示10000个结果
+                    if results_count >= 5000:  # 最多显示5000个结果（减少一半）
                         break
                         
-                if results_count >= 10000:
+                if results_count >= 5000:
                     break
                     
             # 搜索完成
@@ -117,6 +141,11 @@ class SearchThread(QThread):
             
         except Exception as e:
             self.search_error.emit(f'搜索过程中发生错误：{str(e)}')
+            
+    def _need_chapter_info(self):
+        """判断是否需要获取章节信息 - 性能优化"""
+        # 暂时不需要章节信息，避免每次都解析
+        return False
             
     def prepare_search_pattern(self):
         """准备搜索模式"""
@@ -139,7 +168,7 @@ class SearchThread(QThread):
             return None
             
     def find_matches_in_line(self, line, pattern):
-        """在行中查找匹配项"""
+        """在行中查找匹配项 - 性能优化版"""
         matches = []
         for match in pattern.finditer(line):
             matches.append({
@@ -149,63 +178,36 @@ class SearchThread(QThread):
             })
         return matches
         
-    def get_context_before(self, lines, line_index, max_chars):
-        """获取前文上下文"""
+    def get_context_before_fast(self, lines, line_index, max_chars):
+        """获取前文上下文 - 简化版"""
         if line_index <= 0:
             return ''
-            
-        context = ''
-        chars_count = 0
+        return lines[max(0, line_index - 3):line_index][-1] if line_index > 0 else ''
         
-        for i in range(line_index - 1, -1, -1):
-            line = lines[i].strip()
-            if chars_count + len(line) > max_chars:
-                # 截取部分内容
-                remaining = max_chars - chars_count
-                context = '...' + line[-remaining:] + '\n' + context
-                break
-            else:
-                context = line + '\n' + context
-                chars_count += len(line)
-                
-        return context.rstrip()
-        
-    def get_context_after(self, lines, line_index, max_chars):
-        """获取后文上下文"""
+    def get_context_after_fast(self, lines, line_index, max_chars):
+        """获取后文上下文 - 简化版"""
         if line_index >= len(lines) - 1:
             return ''
-            
-        context = ''
-        chars_count = 0
-        
-        for i in range(line_index + 1, len(lines)):
-            line = lines[i].strip()
-            if chars_count + len(line) > max_chars:
-                # 截取部分内容
-                remaining = max_chars - chars_count
-                context = context + '\n' + line[:remaining] + '...'
-                break
-            else:
-                context = context + '\n' + line
-                chars_count += len(line)
-                
-        return context.lstrip()
+        return lines[line_index + 1:min(len(lines), line_index + 4)][0] if line_index < len(lines) - 1 else ''
         
     def get_chapter_info(self, line_num):
-        """获取指定行号所在的章节信息"""
+        """获取指定行号所在的章节信息 - 性能优化版"""
         if not self.chapters:
             return {'chapter': 0, 'title': '未找到章节'}
             
-        # 查找当前行所在的章节
+        # 使用二分查找快速定位章节
+        left, right = 0, len(self.chapters) - 1
         current_chapter = 0
         chapter_title = '未找到章节'
         
-        for i, chapter in enumerate(self.chapters):
-            if line_num >= chapter['line_number']:
-                current_chapter = i + 1
-                chapter_title = chapter['title']
+        while left <= right:
+            mid = (left + right) // 2
+            if self.chapters[mid]['line_number'] <= line_num:
+                current_chapter = mid + 1
+                chapter_title = self.chapters[mid]['title']
+                left = mid + 1
             else:
-                break
+                right = mid - 1
         
         return {'chapter': current_chapter, 'title': chapter_title}
         
@@ -234,28 +236,18 @@ class SearchWindow(QDialog):
         self.init_ui()
     
     def format_book_title(self, title):
-        """格式化书籍标题，去掉时间戳和扩展名，并加上书名号
-        
-        Args:
-            title: 原始标题
-            
-        Returns:
-            格式化后的标题
-        """
+        """格式化书籍标题，去掉时间戳和扩展名，并加上书名号"""
         if not title:
             return "未知书籍"
         
-        # 移除时间戳前缀（格式：数字_文件名.扩展名）
         if '_' in title:
-            book_name = '_'.join(title.split('_')[1:])  # 去掉时间戳部分
+            book_name = '_'.join(title.split('_')[1:])
         else:
             book_name = title
         
-        # 移除扩展名
         if '.' in book_name:
             book_name = '.'.join(book_name.split('.')[:-1])
         
-        # 添加书名号
         return f'《{book_name}》'
         
     def init_ui(self):
@@ -265,7 +257,6 @@ class SearchWindow(QDialog):
         self.setFixedSize(800, 600)
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
         
-        # 设置窗口图标
         if os.path.exists('logo.ico'):
             self.setWindowIcon(QIcon('logo.ico'))
         elif os.path.exists('logo.png'):
@@ -273,28 +264,21 @@ class SearchWindow(QDialog):
         elif os.path.exists('logo.svg'):
             self.setWindowIcon(QIcon('logo.svg'))
         
-        # 主布局
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(15, 15, 15, 15)
         
-        # 搜索区域
         self.create_search_area(main_layout)
         
-        # 分割器 - 上方结果列表，下方预览
         splitter = QSplitter(Qt.Vertical)
         main_layout.addWidget(splitter)
         
-        # 上方：搜索结果列表
         self.create_results_area(splitter)
         
-        # 下方：结果预览
         self.create_preview_area(splitter)
         
-        # 设置分割器比例
         splitter.setSizes([400, 200])
         
-        # 状态和按钮区域
         self.create_status_area(main_layout)
         
     def create_search_area(self, layout):
@@ -313,12 +297,8 @@ class SearchWindow(QDialog):
         search_layout = QVBoxLayout(search_frame)
         search_layout.setSpacing(5)
         
-
-        
-        # 搜索输入区域
         input_layout = QHBoxLayout()
         
-        # 搜索框
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText('请输入搜索关键词...')
         self.search_input.setFont(QFont('Microsoft YaHei', 10))
@@ -335,7 +315,6 @@ class SearchWindow(QDialog):
         )
         self.search_input.returnPressed.connect(self.start_search)
         
-        # 搜索按钮
         self.search_button = QPushButton('搜索')
         self.search_button.setFont(QFont('Microsoft YaHei', 10, QFont.Bold))
         self.search_button.setStyleSheet(
@@ -358,7 +337,6 @@ class SearchWindow(QDialog):
         )
         self.search_button.clicked.connect(self.start_search)
         
-        # 取消按钮
         self.cancel_button = QPushButton('取消')
         self.cancel_button.setFont(QFont('Microsoft YaHei', 10))
         self.cancel_button.setStyleSheet(
@@ -385,7 +363,6 @@ class SearchWindow(QDialog):
         
         search_layout.addLayout(input_layout)
         
-        # 搜索选项
         options_layout = QHBoxLayout()
         
         self.case_sensitive_cb = QCheckBox('区分大小写')
@@ -399,7 +376,6 @@ class SearchWindow(QDialog):
         
         self.search_after_current_cb = QCheckBox('只搜索当前位置之后')
         self.search_after_current_cb.setFont(QFont('Microsoft YaHei', 9))
-        # 如果当前行号大于0，说明有阅读位置，启用并默认勾选该选项
         if self.current_line > 0:
             self.search_after_current_cb.setEnabled(True)
             self.search_after_current_cb.setChecked(True)
@@ -414,7 +390,6 @@ class SearchWindow(QDialog):
         
         search_layout.addLayout(options_layout)
         
-        # 进度条
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setStyleSheet(
@@ -440,7 +415,6 @@ class SearchWindow(QDialog):
         results_layout = QVBoxLayout(results_frame)
         results_layout.setContentsMargins(5, 5, 5, 5)
         
-        # 结果标题和统计
         header_layout = QHBoxLayout()
         
         results_title = QLabel('搜索结果')
@@ -457,7 +431,6 @@ class SearchWindow(QDialog):
         
         results_layout.addLayout(header_layout)
         
-        # 搜索结果列表
         self.results_list = QListWidget()
         self.results_list.setStyleSheet(
             "QListWidget {"
@@ -480,13 +453,11 @@ class SearchWindow(QDialog):
             "}"
         )
         
-        # 连接信号
         self.results_list.itemClicked.connect(self.on_result_clicked)
         self.results_list.itemDoubleClicked.connect(self.on_result_double_clicked)
         
         results_layout.addWidget(self.results_list)
         
-        # 分页控制
         self.create_pagination_controls(results_layout)
         
         parent.addWidget(results_frame)
@@ -495,22 +466,18 @@ class SearchWindow(QDialog):
         """创建分页控制"""
         pagination_layout = QHBoxLayout()
         
-        # 上一页按钮
         self.prev_button = QPushButton('上一页')
         self.prev_button.setEnabled(False)
         self.prev_button.clicked.connect(self.prev_page)
         
-        # 页码信息
         self.page_info = QLabel('第 0 页，共 0 页')
         self.page_info.setFont(QFont('Microsoft YaHei', 9))
         self.page_info.setAlignment(Qt.AlignCenter)
         
-        # 下一页按钮
         self.next_button = QPushButton('下一页')
         self.next_button.setEnabled(False)
         self.next_button.clicked.connect(self.next_page)
         
-        # 每页显示数量
         page_size_label = QLabel('每页显示：')
         page_size_label.setFont(QFont('Microsoft YaHei', 9))
         
@@ -537,13 +504,11 @@ class SearchWindow(QDialog):
         preview_layout = QVBoxLayout(preview_frame)
         preview_layout.setContentsMargins(5, 5, 5, 5)
         
-        # 预览标题
         preview_title = QLabel('内容预览')
         preview_title.setFont(QFont('Microsoft YaHei', 10, QFont.Bold))
         preview_title.setStyleSheet('color: #495057; padding: 5px;')
         preview_layout.addWidget(preview_title)
         
-        # 预览内容
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setStyleSheet(
@@ -566,7 +531,6 @@ class SearchWindow(QDialog):
         """创建状态和按钮区域"""
         status_layout = QHBoxLayout()
         
-        # 跳转按钮
         self.goto_button = QPushButton('跳转到位置')
         self.goto_button.setFont(QFont('Microsoft YaHei', 9))
         self.goto_button.setStyleSheet(
@@ -592,7 +556,6 @@ class SearchWindow(QDialog):
         self.goto_button.setEnabled(False)
         self.goto_button.clicked.connect(self.goto_result)
         
-        # 自动关闭配置选项
         self.auto_close_checkbox = QCheckBox('跳转后自动关闭窗口')
         self.auto_close_checkbox.setFont(QFont('Microsoft YaHei', 9))
         self.auto_close_checkbox.setChecked(self.auto_close_after_jump)
@@ -614,12 +577,10 @@ class SearchWindow(QDialog):
             "    border: 2px solid #007bff;"
             "    background-color: #007bff;"
             "    border-radius: 3px;"
-            "    image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEwIDNMNC41IDguNUwyIDYiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPgo=);"
             "}"
         )
         self.auto_close_checkbox.toggled.connect(self.on_auto_close_toggled)
         
-        # 关闭按钮
         close_button = QPushButton('关闭')
         close_button.setFont(QFont('Microsoft YaHei', 9))
         close_button.setStyleSheet(
@@ -653,25 +614,21 @@ class SearchWindow(QDialog):
             ToastManager.show_warning('请输入搜索关键词！', self)
             return
             
-        # 清空之前的结果
         self.search_results.clear()
         self.results_list.clear()
         self.current_page = 0
         self.update_pagination()
         
-        # 显示进度条和取消按钮
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.search_button.setVisible(False)
         self.cancel_button.setVisible(True)
         self.results_stats.setText('正在搜索...')
         
-        # 确定搜索起始行
         start_line = 1
         if self.search_after_current_cb.isChecked() and self.search_after_current_cb.isEnabled():
             start_line = self.current_line
         
-        # 创建搜索线程
         self.search_thread = SearchThread(
             self.file_path,
             keyword,
@@ -681,20 +638,18 @@ class SearchWindow(QDialog):
             start_line
         )
         
-        # 连接信号
         self.search_thread.search_progress.connect(self.update_progress)
         self.search_thread.search_result.connect(self.add_search_result)
         self.search_thread.search_finished.connect(self.search_completed)
         self.search_thread.search_error.connect(self.search_failed)
         
-        # 启动搜索
         self.search_thread.start()
         
     def cancel_search(self):
         """取消搜索"""
         if self.search_thread and self.search_thread.isRunning():
             self.search_thread.cancel()
-            self.search_thread.wait(3000)  # 等待最多3秒
+            self.search_thread.wait(3000)
             
         self.search_completed(len(self.search_results))
         
@@ -706,24 +661,20 @@ class SearchWindow(QDialog):
         """添加搜索结果"""
         self.search_results.append(result)
         
-        # 如果是第一页的结果，立即显示
         if len(self.search_results) <= self.page_size:
             self.update_results_display()
             
     def search_completed(self, total_results):
         """搜索完成"""
-        # 隐藏进度条和取消按钮
         self.progress_bar.setVisible(False)
         self.search_button.setVisible(True)
         self.cancel_button.setVisible(False)
         
-        # 更新统计信息
         if total_results == 0:
             self.results_stats.setText('未找到匹配结果')
         else:
             self.results_stats.setText(f'找到 {total_results} 个匹配结果')
             
-        # 更新显示
         self.update_results_display()
         self.update_pagination()
         
@@ -739,15 +690,12 @@ class SearchWindow(QDialog):
         if not self.search_results:
             return
             
-        # 计算当前页的结果范围
         start_index = self.current_page * self.page_size
         end_index = min(start_index + self.page_size, len(self.search_results))
         
-        # 显示当前页的结果
         for i in range(start_index, end_index):
             result = self.search_results[i]
             
-            # 创建显示文本，包含章节信息
             if result['chapter'] > 0:
                 display_text = f"第 {result['chapter']} 章 - 第 {result['line_number']} 行：{result['line_content'][:100]}"
             else:
@@ -756,8 +704,7 @@ class SearchWindow(QDialog):
                 display_text += '...'
                 
             item = QListWidgetItem(display_text)
-            item.setData(Qt.UserRole, result)  # 存储完整结果数据
-            item.setToolTip(f"匹配文本：{result['match_text']}\n章节：{result['chapter_title']}")
+            item.setData(Qt.UserRole, result)
             
             self.results_list.addItem(item)
             
@@ -793,7 +740,7 @@ class SearchWindow(QDialog):
             new_size = int(size_text)
             if new_size != self.page_size:
                 self.page_size = new_size
-                self.current_page = 0  # 重置到第一页
+                self.current_page = 0
                 self.update_results_display()
                 self.update_pagination()
         except ValueError:
@@ -814,41 +761,26 @@ class SearchWindow(QDialog):
             
     def show_result_preview(self, result):
         """显示搜索结果预览"""
-        # 构建预览文本，包含章节信息
         if result['chapter'] > 0:
             preview_text = f"""章节：第 {result['chapter']} 章 - {result['chapter_title']}
 位置：第 {result['line_number']} 行
 匹配文本：{result['match_text']}
 
---- 前文 ---
-{result['context_before']}
-
 --- 匹配行 ---
-{result['line_content']}
-
---- 后文 ---
-{result['context_after']}"""
+{result['line_content']}"""
         else:
             preview_text = f"""位置：第 {result['line_number']} 行
 匹配文本：{result['match_text']}
 
---- 前文 ---
-{result['context_before']}
-
 --- 匹配行 ---
-{result['line_content']}
-
---- 后文 ---
-{result['context_after']}"""
+{result['line_content']}"""
         
         self.preview_text.setPlainText(preview_text)
         
-        # 高亮匹配文本（简单实现）
         cursor = self.preview_text.textCursor()
         format = QTextCharFormat()
-        format.setBackground(QColor(255, 255, 0))  # 黄色背景
+        format.setBackground(QColor(255, 255, 0))
         
-        # 查找并高亮匹配文本
         text = self.preview_text.toPlainText()
         match_text = result['match_text']
         start = text.find(match_text)
@@ -867,9 +799,7 @@ class SearchWindow(QDialog):
             
         result = current_item.data(Qt.UserRole)
         if result:
-            # 发送跳转信号
             self.search_result_selected.emit(result['line_number'])
-            # 根据配置决定是否自动关闭窗口
             if self.auto_close_after_jump:
                 self.close()
     
@@ -879,7 +809,6 @@ class SearchWindow(QDialog):
             
     def closeEvent(self, event):
         """窗口关闭事件"""
-        # 取消正在进行的搜索
         if self.search_thread and self.search_thread.isRunning():
             self.search_thread.cancel()
             self.search_thread.wait(3000)

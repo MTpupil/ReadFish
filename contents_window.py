@@ -68,11 +68,28 @@ class ContentsWindow(QDialog):
     # 定义信号
     chapter_selected = pyqtSignal(dict)  # 章节选择信号
     
-    def __init__(self, book_info, parent=None):
+    def __init__(self, book_info, *args, **kwargs):
+        # 兼容两种调用方式：
+        # 方式1: ContentsWindow(book_info, current_line_number, parent)
+        # 方式2: ContentsWindow(book_info, parent)
+        parent = kwargs.get('parent', None)
+        current_line_number = kwargs.get('current_line_number', None)
+        
+        if len(args) > 0:
+            arg = args[0]
+            # 检查第一个位置参数是数字（行号）还是 QWidget（父窗口）
+            if isinstance(arg, int):
+                current_line_number = arg
+                if len(args) > 1:
+                    parent = args[1]
+            else:
+                parent = arg
+        
         super().__init__(parent)
         self.book_info = book_info
         self.chapters = []
         self.parse_thread = None
+        self.current_line_number = current_line_number  # 当前阅读的行号（用于定位）
         
         self.init_ui()
         self.start_parsing()
@@ -459,6 +476,9 @@ class ContentsWindow(QDialog):
         
         self.chapter_info.setText(info_text)
         
+        # 解析完成后，自动定位到当前阅读的章节
+        self.highlight_current_chapter()
+        
     @pyqtSlot(int)
     def on_parse_progress(self, value):
         """更新解析进度"""
@@ -519,3 +539,33 @@ class ContentsWindow(QDialog):
             self.accept()  # 关闭对话框
         else:
             print("[调试] 跳转失败: 章节数据为空")
+
+    def highlight_current_chapter(self):
+        """高亮显示当前正在阅读的章节 - 使用二分查找优化"""
+        if not self.current_line_number or not self.chapters:
+            return
+        
+        try:
+            # 使用二分查找快速定位当前行号所在的章节
+            left, right = 0, len(self.chapters) - 1
+            target_index = -1
+            
+            while left <= right:
+                mid = (left + right) // 2
+                if self.chapters[mid]['line_number'] <= self.current_line_number:
+                    target_index = mid
+                    left = mid + 1
+                else:
+                    right = mid - 1
+            
+            if target_index >= 0:
+                # 选中该章节
+                item = self.chapter_list.item(target_index)
+                if item:
+                    self.chapter_list.setCurrentItem(item)
+                    # 滚动到可见区域
+                    self.chapter_list.scrollToItem(item)
+                    
+        except Exception as e:
+            print(f"[调试] 高亮章节时出错: {e}")
+            pass

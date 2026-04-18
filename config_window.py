@@ -7,7 +7,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QSlider, QSpinBox, QPushButton, QColorDialog,
-    QComboBox, QGroupBox, QMessageBox, QFrame, QCheckBox
+    QComboBox, QGroupBox, QMessageBox, QFrame, QCheckBox, QTextEdit, QTabWidget
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPalette
@@ -30,7 +30,7 @@ class ConfigWindow(QDialog):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle('ReadFish - 设置')
-        self.setFixedSize(480, 720)
+        self.setFixedSize(500, 600)
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
         
         # 设置窗口图标
@@ -46,29 +46,108 @@ class ConfigWindow(QDialog):
         
         # 主布局
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(15)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         
-        # 窗口设置组
-        window_group = self.create_window_group()
-        main_layout.addWidget(window_group)
+        # 创建标签页
+        self.tab_widget = QTabWidget()
+        main_layout.addWidget(self.tab_widget)
         
-        # 文字设置组
-        text_group = self.create_text_group()
-        main_layout.addWidget(text_group)
-
-        # 光标设置组（新增）
-        cursor_group = self.create_cursor_group()
-        main_layout.addWidget(cursor_group)
-
-        # 翻页按键设置组（新增）
-        nav_group = self.create_navigation_key_group()
-        main_layout.addWidget(nav_group)
+        # 添加标签页
+        self.create_window_tab()
+        self.create_text_tab()
+        self.create_cursor_tab()
+        self.create_navigation_tab()
+        self.create_auto_read_tab()
+        self.create_shortcuts_tab()
         
         # 按钮区域
         button_layout = self.create_button_layout()
         main_layout.addLayout(button_layout)
+    
+    def create_window_tab(self):
+        """创建窗口设置标签页"""
+        widget = QFrame()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
         
+        # 窗口设置组
+        window_group = self.create_window_group()
+        layout.addWidget(window_group)
+        layout.addStretch()
+        
+        self.tab_widget.addTab(widget, '窗口')
+    
+    def create_text_tab(self):
+        """创建文字设置标签页"""
+        widget = QFrame()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 文字设置组
+        text_group = self.create_text_group()
+        layout.addWidget(text_group)
+        layout.addStretch()
+        
+        self.tab_widget.addTab(widget, '文字')
+    
+    def create_cursor_tab(self):
+        """创建光标设置标签页"""
+        widget = QFrame()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 光标设置组
+        cursor_group = self.create_cursor_group()
+        layout.addWidget(cursor_group)
+        layout.addStretch()
+        
+        self.tab_widget.addTab(widget, '光标')
+    
+    def create_navigation_tab(self):
+        """创建翻页按键设置标签页"""
+        widget = QFrame()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 翻页按键设置组
+        nav_group = self.create_navigation_key_group()
+        layout.addWidget(nav_group)
+        layout.addStretch()
+        
+        self.tab_widget.addTab(widget, '翻页')
+    
+    def create_auto_read_tab(self):
+        """创建自动阅读设置标签页"""
+        widget = QFrame()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 自动阅读设置组
+        auto_read_group = self.create_auto_read_group()
+        layout.addWidget(auto_read_group)
+        layout.addStretch()
+        
+        self.tab_widget.addTab(widget, '自动阅读')
+    
+    def create_shortcuts_tab(self):
+        """创建快捷键说明标签页"""
+        widget = QFrame()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 快捷键说明
+        shortcuts_group = self.create_shortcuts_group()
+        layout.addWidget(shortcuts_group)
+        
+        self.tab_widget.addTab(widget, '快捷键')
+    
     def create_window_group(self):
         """创建窗口设置组"""
         group = QGroupBox('窗口设置')
@@ -294,6 +373,82 @@ class ConfigWindow(QDialog):
         layout.addRow(tip)
 
         return group
+
+    def create_auto_read_group(self):
+        """创建自动阅读设置组"""
+        group = QGroupBox('自动阅读设置')
+        layout = QFormLayout(group)
+        layout.setSpacing(10)
+
+        # 速度设置
+        speed_row = QFrame()
+        speed_layout = QHBoxLayout(speed_row)
+        speed_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.auto_read_speed_slider = QSlider(Qt.Horizontal)
+        # 为了支持0.5的步长，我们使用整数滑块（0-19，对应0.5-10秒）
+        self.auto_read_speed_slider.setRange(0, 19)
+        self.auto_read_speed_slider.valueChanged.connect(self.on_auto_read_speed_changed)
+        
+        self.auto_read_speed_label = QLabel('2.0 秒/页')
+        self.auto_read_speed_label.setMinimumWidth(80)
+        
+        speed_layout.addWidget(self.auto_read_speed_slider)
+        speed_layout.addWidget(self.auto_read_speed_label)
+        layout.addRow('翻页速度:', speed_row)
+        
+        # 去除空行设置
+        self.remove_empty_lines_checkbox = QCheckBox()
+        self.remove_empty_lines_checkbox.setText('去除完全空行')
+        self.remove_empty_lines_checkbox.setToolTip('启用后，阅读时会自动过滤掉完全空白的行')
+        self.remove_empty_lines_checkbox.stateChanged.connect(self.on_config_changed)
+        layout.addRow('显示设置:', self.remove_empty_lines_checkbox)
+
+        return group
+
+    def create_shortcuts_group(self):
+        """创建快捷键说明组"""
+        group = QGroupBox('快捷键说明')
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
+
+        # 快捷键文本
+        shortcuts_text = """
+阅读器快捷键：
+  Ctrl + E    显示章节进度
+  Ctrl + F    打开搜索窗口
+  Ctrl + I    打开设置窗口
+  Ctrl + A    开始/关闭自动阅读
+  Ctrl + Q    退出应用
+  Ctrl + `    临时固定显示阅读器
+  ESC         关闭阅读器窗口
+  ↑ / PageUp  上一页（或加快自动阅读速度）
+  ↓ / PageDown 下一页（或减慢自动阅读速度）
+  空格        暂停/恢复自动阅读（仅在自动阅读时有效）
+
+说明：
+- 所有快捷键需要阅读器有焦点才能生效
+- 自定义翻页按键可在上方配置中设置
+        """
+
+        self.shortcuts_text = QTextEdit()
+        self.shortcuts_text.setReadOnly(True)
+        self.shortcuts_text.setPlainText(shortcuts_text.strip())
+        self.shortcuts_text.setStyleSheet(
+            "QTextEdit {"
+            "    border: 1px solid #ced4da;"
+            "    border-radius: 4px;"
+            "    background-color: #f8f9fa;"
+            "    color: #495057;"
+            "    font-family: 'Consolas', 'Courier New', monospace;"
+            "    font-size: 9pt;"
+            "    padding: 10px;"
+            "}"
+        )
+
+        layout.addWidget(self.shortcuts_text)
+
+        return group
         
     def create_button_layout(self):
         """创建按钮布局"""
@@ -373,6 +528,8 @@ class ConfigWindow(QDialog):
         try:
             self.dot_size_slider.valueChanged.disconnect()
             self.dot_opacity_slider.valueChanged.disconnect()
+            self.auto_read_speed_slider.valueChanged.disconnect()
+            self.remove_empty_lines_checkbox.stateChanged.disconnect()
         except Exception:
             pass
         
@@ -435,6 +592,16 @@ class ConfigWindow(QDialog):
             down_keys = self.config.get('page_down_keys', [])
             self.page_up_keys_label.setText(', '.join(up_keys) if up_keys else '未设置')
             self.page_down_keys_label.setText(', '.join(down_keys) if down_keys else '未设置')
+
+            # 自动阅读速度设置
+            auto_read_speed = self.config.get('auto_read_speed', 2.0)
+            # 转换为滑块值（0.5-10秒 -> 0-19）
+            slider_value = int((auto_read_speed - 0.5) / 0.5)
+            self.auto_read_speed_slider.setValue(slider_value)
+            self.auto_read_speed_label.setText(f'{auto_read_speed:.1f} 秒/页')
+            
+            # 去除空行设置
+            self.remove_empty_lines_checkbox.setChecked(self.config.get('remove_empty_lines', False))
             
         finally:
             # 重新连接信号（宽高输入框现在是只读的，不需要重连信号）
@@ -451,6 +618,12 @@ class ConfigWindow(QDialog):
                 self.dot_size_slider.valueChanged.connect(self.on_dot_size_changed)
             if hasattr(self, 'dot_opacity_slider'):
                 self.dot_opacity_slider.valueChanged.connect(self.on_dot_opacity_changed)
+            # 新增：自动阅读速度滑块重连信号
+            if hasattr(self, 'auto_read_speed_slider'):
+                self.auto_read_speed_slider.valueChanged.connect(self.on_auto_read_speed_changed)
+            # 新增：去除空行复选框重连信号
+            if hasattr(self, 'remove_empty_lines_checkbox'):
+                self.remove_empty_lines_checkbox.stateChanged.connect(self.on_config_changed)
         
     def on_config_changed(self):
         """配置改变时更新内部配置并立即应用"""
@@ -462,6 +635,7 @@ class ConfigWindow(QDialog):
         self.config['custom_key'] = self.custom_key_combo.currentText()
         self.config['font_size'] = self.font_size_spinbox.value()
         self.config['font_family'] = self.font_family_combo.currentText()
+        self.config['remove_empty_lines'] = self.remove_empty_lines_checkbox.isChecked()
 
         # 控制自定义按键下拉框使能状态：仅在“按键隐藏”开启时可操作
         self.custom_key_combo.setEnabled(self.key_to_show_checkbox.isChecked())
@@ -669,7 +843,22 @@ class ConfigWindow(QDialog):
         # 保存配置并通知变更
         self.config_manager.save_config(self.config)
         self.config_changed.emit()
-    
+
+    def on_auto_read_speed_changed(self, value):
+        """自动阅读速度改变"""
+        # 转换为实际速度值（0-19 -> 0.5-10秒，步长0.5）
+        speed = 0.5 + value * 0.5
+        self.config['auto_read_speed'] = speed
+        self.auto_read_speed_label.setText(f'{speed:.1f} 秒/页')
+        # 立即保存并应用配置
+        self.config_manager.save_config(self.config)
+        self.config_changed.emit()
+
+    def refresh_config(self):
+        """刷新配置显示（供外部调用）"""
+        self.config = self.config_manager.get_config().copy()
+        self.load_current_config()
+
     def closeEvent(self, event):
         """窗口关闭事件"""
         # 结束任何录入状态，避免下次打开仍显示“正在录入”
