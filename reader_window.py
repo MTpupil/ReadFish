@@ -1851,7 +1851,7 @@ class ReaderWindow(QWidget):
         elif event.key() == Qt.Key_PageDown:
             if content_visible_now:
                 self.page_down()
-        # 自定义翻页按键：字母/数字 + 特定单键（space/enter/tab），禁止组合键
+        # 自定义翻页按键：支持字母/数字/符号/特定单键（space/enter/tab），禁止组合键
         else:
             # 禁止组合键：仅在无修饰键时才响应自定义翻页按键
             if event.modifiers() == Qt.NoModifier and content_visible_now:
@@ -1864,9 +1864,9 @@ class ReaderWindow(QWidget):
                 elif event.key() == Qt.Key_Tab:
                     key_token = 'tab'
                 else:
-                    # 使用event.text()获取字母或数字
-                    t = event.text().strip().lower()
-                    if len(t) == 1 and (t.isalpha() or t.isdigit()):
+                    # 使用event.text()获取字符（支持字母、数字、符号键）
+                    t = event.text()
+                    if t and len(t.strip()) == 1:
                         key_token = t
                 # 根据用户设置触发翻页
                 if key_token:

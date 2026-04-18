@@ -326,53 +326,137 @@ class ConfigWindow(QDialog):
 
     def create_navigation_key_group(self):
         """创建翻页按键设置组
-        - 允许用户通过“按键录入”的方式添加最多两个上一页和两个下一页的按键
+        - 允许用户通过"按键录入"的方式添加最多五个上一页和五个下一页的按键
         - 保留默认方向键和PageUp/PageDown翻页功能
+        - 每个按键都有单独的删除按钮
+        - 支持字母、数字、符号键
         """
         group = QGroupBox('翻页按键设置')
-        layout = QFormLayout(group)
-        layout.setSpacing(10)
+        group_layout = QVBoxLayout(group)
+        group_layout.setSpacing(8)
 
-        # 上一页按键显示与操作
-        up_layout = QHBoxLayout()
-        self.page_up_keys_label = QLabel('未设置')
-        self.page_up_record_btn = QPushButton('录入上一页按键')
-        self.page_up_clear_btn = QPushButton('清除')
-        self.page_up_record_btn.setToolTip('点击后，按下要设置的按键进行录入（支持字母/数字、Space、Enter、Tab；最多两个；不支持组合键和 Ctrl/Alt/Shift/Win）。')
-        self.page_up_clear_btn.setToolTip('清除已设置的上一页按键')
+        # ===== 上一页按键 =====
+        up_label = QLabel('上一页按键:')
+        up_label.setStyleSheet('font-weight: bold;')
+        group_layout.addWidget(up_label)
+
+        # 上一页按键容器
+        self.page_up_keys_container = QFrame()
+        self.page_up_keys_layout = QHBoxLayout(self.page_up_keys_container)
+        self.page_up_keys_layout.setContentsMargins(0, 0, 0, 0)
+        self.page_up_keys_layout.setSpacing(6)
+        self.page_up_keys_container.setStyleSheet('background-color: #f8f9fa; border-radius: 4px; padding: 6px;')
+        group_layout.addWidget(self.page_up_keys_container)
+
+        # 上一页操作按钮
+        up_btn_layout = QHBoxLayout()
+        self.page_up_record_btn = QPushButton('+ 添加按键')
+        self.page_up_record_btn.setToolTip('点击后按下要添加的按键（支持字母、数字、符号键）')
+        self.page_up_record_btn.setFixedSize(90, 28)
         self.page_up_record_btn.clicked.connect(self.start_record_up_keys)
-        self.page_up_clear_btn.clicked.connect(self.clear_up_keys)
-        up_layout.addWidget(self.page_up_keys_label)
-        up_layout.addStretch()
-        up_layout.addWidget(self.page_up_record_btn)
-        up_layout.addWidget(self.page_up_clear_btn)
-        layout.addRow('上一页按键:', up_layout)
+        up_btn_layout.addWidget(self.page_up_record_btn)
+        up_btn_layout.addStretch()
+        up_count_label = QLabel('最多可添加 5 个')
+        up_count_label.setStyleSheet('color: #7f8c8d; font-size: 10pt;')
+        up_btn_layout.addWidget(up_count_label)
+        group_layout.addLayout(up_btn_layout)
 
-        # 下一页按键显示与操作
-        down_layout = QHBoxLayout()
-        self.page_down_keys_label = QLabel('未设置')
-        self.page_down_record_btn = QPushButton('录入下一页按键')
-        self.page_down_clear_btn = QPushButton('清除')
-        self.page_down_record_btn.setToolTip('点击后，按下要设置的按键进行录入（支持字母/数字、Space、Enter、Tab；最多两个；不支持组合键和 Ctrl/Alt/Shift/Win）。')
-        self.page_down_clear_btn.setToolTip('清除已设置的下一页按键')
+        # ===== 下一页按键 =====
+        down_label = QLabel('下一页按键:')
+        down_label.setStyleSheet('font-weight: bold;')
+        group_layout.addWidget(down_label)
+
+        # 下一页按键容器
+        self.page_down_keys_container = QFrame()
+        self.page_down_keys_layout = QHBoxLayout(self.page_down_keys_container)
+        self.page_down_keys_layout.setContentsMargins(0, 0, 0, 0)
+        self.page_down_keys_layout.setSpacing(6)
+        self.page_down_keys_container.setStyleSheet('background-color: #f8f9fa; border-radius: 4px; padding: 6px;')
+        group_layout.addWidget(self.page_down_keys_container)
+
+        # 下一页操作按钮
+        down_btn_layout = QHBoxLayout()
+        self.page_down_record_btn = QPushButton('+ 添加按键')
+        self.page_down_record_btn.setToolTip('点击后按下要添加的按键（支持字母、数字、符号键）')
+        self.page_down_record_btn.setFixedSize(90, 28)
         self.page_down_record_btn.clicked.connect(self.start_record_down_keys)
-        self.page_down_clear_btn.clicked.connect(self.clear_down_keys)
-        down_layout.addWidget(self.page_down_keys_label)
-        down_layout.addStretch()
-        down_layout.addWidget(self.page_down_record_btn)
-        down_layout.addWidget(self.page_down_clear_btn)
-        layout.addRow('下一页按键:', down_layout)
+        down_btn_layout.addWidget(self.page_down_record_btn)
+        down_btn_layout.addStretch()
+        down_count_label = QLabel('最多可添加 5 个')
+        down_count_label.setStyleSheet('color: #7f8c8d; font-size: 10pt;')
+        down_btn_layout.addWidget(down_count_label)
+        group_layout.addLayout(down_btn_layout)
+
+        # 提示信息
+        tip = QLabel('提示：默认方向键和 PageUp/PageDown 始终可用。添加自定义按键可配合使用。')
+        tip.setStyleSheet('color: #7f8c8d; font-size: 10pt;')
+        group_layout.addWidget(tip)
 
         # 录入状态标志
         self.recording_up = False
         self.recording_down = False
 
-        # 提示信息
-        tip = QLabel('提示：最多设置两个按键（字母/数字或 Space、Enter、Tab）。默认方向键和 PageUp/PageDown 始终可用。')
-        tip.setStyleSheet('color: #7f8c8d;')
-        layout.addRow(tip)
-
         return group
+
+    def refresh_key_tags(self):
+        """刷新按键标签显示（上一页和下一页）"""
+        self._refresh_key_tags_for('page_up_keys', self.page_up_keys_layout, self.page_up_record_btn)
+        self._refresh_key_tags_for('page_down_keys', self.page_down_keys_layout, self.page_down_record_btn)
+
+    def _refresh_key_tags_for(self, config_key, layout, record_btn):
+        """为指定方向刷新按键标签"""
+        # 清除旧标签
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        keys = self.config.get(config_key, [])
+        max_keys = 5
+
+        # 更新按钮状态
+        if len(keys) >= max_keys:
+            record_btn.setEnabled(False)
+            record_btn.setText('已达上限')
+        else:
+            record_btn.setEnabled(True)
+            record_btn.setText('+ 添加按键')
+
+        if not keys:
+            empty_label = QLabel('未设置')
+            empty_label.setStyleSheet('color: #999; font-style: italic;')
+            layout.addWidget(empty_label)
+            return
+
+        # 为每个按键创建标签+删除按钮
+        for idx, key_token in enumerate(keys):
+            row_frame = QFrame()
+            row_layout = QHBoxLayout(row_frame)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
+
+            # 按键标签
+            key_label = QLabel(f'  {key_token}  ')
+            key_label.setStyleSheet(
+                'background-color: #e8f4fd; color: #2c3e50; border: 1px solid #b0d4f1; '
+                'border-radius: 3px; font-family: monospace; font-size: 11pt;'
+            )
+            row_layout.addWidget(key_label)
+
+            # 删除按钮
+            del_btn = QPushButton('×')
+            del_btn.setFixedSize(20, 20)
+            del_btn.setStyleSheet(
+                'QPushButton { background-color: #e74c3c; color: white; border: none; '
+                'border-radius: 10px; font-size: 12pt; font-weight: bold; }'
+                'QPushButton:hover { background-color: #c0392b; }'
+            )
+            del_btn.setToolTip(f'删除按键 "{key_token}"')
+            del_btn.clicked.connect(lambda checked, k=config_key, t=key_token: self.remove_key(k, t))
+            row_layout.addWidget(del_btn)
+            row_layout.addStretch()
+
+            layout.addWidget(row_frame)
 
     def create_auto_read_group(self):
         """创建自动阅读设置组"""
@@ -590,10 +674,7 @@ class ConfigWindow(QDialog):
             self.dot_opacity_label.setText(f'{dot_opacity}%')
 
             # 翻页按键设置显示
-            up_keys = self.config.get('page_up_keys', [])
-            down_keys = self.config.get('page_down_keys', [])
-            self.page_up_keys_label.setText(', '.join(up_keys) if up_keys else '未设置')
-            self.page_down_keys_label.setText(', '.join(down_keys) if down_keys else '未设置')
+            self.refresh_key_tags()
 
             # 自动阅读速度设置
             auto_read_speed = self.config.get('auto_read_speed', 2.0)
@@ -740,7 +821,7 @@ class ConfigWindow(QDialog):
         
     def keyPressEvent(self, event):
         """键盘按键事件处理"""
-        # 如果正在录入翻页按键，捕获字母键并写入配置
+        # 如果正在录入翻页按键，捕获按键并写入配置
         if self.recording_up or self.recording_down:
             # 禁止组合键：仅在无修饰键时才允许录入
             if event.modifiers() != Qt.NoModifier:
@@ -756,9 +837,9 @@ class ConfigWindow(QDialog):
             elif event.key() == Qt.Key_Tab:
                 key_token = 'tab'
             else:
-                # 使用event.text()获取字母或数字
-                text = event.text().strip().lower()
-                if len(text) == 1 and (text.isalpha() or text.isdigit()):
+                # 使用event.text()获取字符（支持字母、数字、符号）
+                text = event.text()
+                if text and len(text.strip()) == 1:
                     key_token = text
 
             # 过滤禁止的特殊键
@@ -766,30 +847,19 @@ class ConfigWindow(QDialog):
                 event.accept()
                 return
 
-            # 录入逻辑
+            # 录入逻辑（添加按键，支持最多5个）
             if key_token:
                 if self.recording_up:
-                    up_keys = self.config.get('page_up_keys', [])
-                    if key_token not in up_keys and len(up_keys) < 2:
-                        up_keys.append(key_token)
-                        self.config['page_up_keys'] = up_keys
-                        self.page_up_keys_label.setText(', '.join(up_keys))
-                        self.config_manager.save_config(self.config)
-                        self.config_changed.emit()
-                    # 成功录入一个按键后，自动结束录入，避免持续显示“正在录入”
-                    self.recording_up = False
-                    self.page_up_record_btn.setText('录入上一页按键')
+                    success = self.add_key('page_up_keys', key_token)
+                    if success:
+                        # 成功添加后自动结束录入
+                        self.recording_up = False
+                        self.page_up_record_btn.setText('+ 添加按键')
                 elif self.recording_down:
-                    down_keys = self.config.get('page_down_keys', [])
-                    if key_token not in down_keys and len(down_keys) < 2:
-                        down_keys.append(key_token)
-                        self.config['page_down_keys'] = down_keys
-                        self.page_down_keys_label.setText(', '.join(down_keys))
-                        self.config_manager.save_config(self.config)
-                        self.config_changed.emit()
-                    # 成功录入一个按键后，自动结束录入，避免持续显示“正在录入”
-                    self.recording_down = False
-                    self.page_down_record_btn.setText('录入下一页按键')
+                    success = self.add_key('page_down_keys', key_token)
+                    if success:
+                        self.recording_down = False
+                        self.page_down_record_btn.setText('+ 添加按键')
 
             # 正在录入时不向父窗口传递按键事件
             event.accept()
@@ -807,44 +877,42 @@ class ConfigWindow(QDialog):
     def start_record_up_keys(self):
         """开始录入上一页按键"""
         self.recording_down = False
-        self.page_down_record_btn.setText('录入下一页按键')
-        # 切换录入状态
-        self.recording_up = not self.recording_up
-        self.page_up_record_btn.setText('正在录入...(按一个键后自动完成，可再次点击录入第二个)' if self.recording_up else '录入上一页按键')
-        # 焦点确保按键能被接收
+        self.page_down_record_btn.setText('+ 添加按键')
+        self.recording_up = True
+        self.page_up_record_btn.setText('⏺ 请按键...')
         self.activateWindow()
         self.setFocus(Qt.OtherFocusReason)
 
     def start_record_down_keys(self):
         """开始录入下一页按键"""
         self.recording_up = False
-        self.page_up_record_btn.setText('录入上一页按键')
-        # 切换录入状态
-        self.recording_down = not self.recording_down
-        self.page_down_record_btn.setText('正在录入...(按一个键后自动完成，可再次点击录入第二个)' if self.recording_down else '录入下一页按键')
-        # 焦点确保按键能被接收
+        self.page_up_record_btn.setText('+ 添加按键')
+        self.recording_down = True
+        self.page_down_record_btn.setText('⏺ 请按键...')
         self.activateWindow()
         self.setFocus(Qt.OtherFocusReason)
 
-    def clear_up_keys(self):
-        """清除上一页按键设置"""
-        self.recording_up = False
-        self.page_up_record_btn.setText('录入上一页按键')
-        self.config['page_up_keys'] = []
-        self.page_up_keys_label.setText('未设置')
-        # 保存配置并通知变更
-        self.config_manager.save_config(self.config)
-        self.config_changed.emit()
+    def remove_key(self, config_key, key_token):
+        """删除指定按键"""
+        keys = self.config.get(config_key, [])
+        if key_token in keys:
+            keys.remove(key_token)
+            self.config[config_key] = keys
+            self.config_manager.save_config(self.config)
+            self.config_changed.emit()
+            self.refresh_key_tags()
 
-    def clear_down_keys(self):
-        """清除下一页按键设置"""
-        self.recording_down = False
-        self.page_down_record_btn.setText('录入下一页按键')
-        self.config['page_down_keys'] = []
-        self.page_down_keys_label.setText('未设置')
-        # 保存配置并通知变更
-        self.config_manager.save_config(self.config)
-        self.config_changed.emit()
+    def add_key(self, config_key, key_token):
+        """添加按键"""
+        keys = self.config.get(config_key, [])
+        if key_token not in keys and len(keys) < 5:
+            keys.append(key_token)
+            self.config[config_key] = keys
+            self.config_manager.save_config(self.config)
+            self.config_changed.emit()
+            self.refresh_key_tags()
+            return True
+        return False
 
     def on_auto_read_speed_changed(self, value):
         """自动阅读速度改变"""
@@ -869,9 +937,9 @@ class ConfigWindow(QDialog):
             self.recording_down = False
             # 恢复按钮文本
             if hasattr(self, 'page_up_record_btn'):
-                self.page_up_record_btn.setText('录入上一页按键')
+                self.page_up_record_btn.setText('+ 添加按键')
             if hasattr(self, 'page_down_record_btn'):
-                self.page_down_record_btn.setText('录入下一页按键')
+                self.page_down_record_btn.setText('+ 添加按键')
         except Exception:
             pass
         # 配置已自动保存，直接关闭窗口
