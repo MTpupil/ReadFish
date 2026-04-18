@@ -19,6 +19,44 @@ class ConfigWindow(QDialog):
     # 定义信号
     config_changed = pyqtSignal()  # 配置改变信号
     
+    # Qt 键值到显示名的映射（用于 UI 显示）
+    KEY_VALUE_TO_DISPLAY_NAME = {
+        Qt.Key_Space: 'Space',
+        Qt.Key_Return: 'Enter',
+        Qt.Key_Enter: 'Enter',
+        Qt.Key_Tab: 'Tab',
+        Qt.Key_Comma: ',',
+        Qt.Key_Period: '.',
+        Qt.Key_Semicolon: ';',
+        Qt.Key_Colon: ':',
+        Qt.Key_Question: '?',
+        Qt.Key_Exclam: '!',
+        Qt.Key_QuoteDbl: '"',
+        Qt.Key_Apostrophe: "'",
+        Qt.Key_ParenLeft: '(',
+        Qt.Key_ParenRight: ')',
+        Qt.Key_BracketLeft: '[',
+        Qt.Key_BracketRight: ']',
+        Qt.Key_BraceLeft: '{',
+        Qt.Key_BraceRight: '}',
+        Qt.Key_Minus: '-',
+        Qt.Key_Underscore: '_',
+        Qt.Key_Plus: '+',
+        Qt.Key_Equal: '=',
+        Qt.Key_Asterisk: '*',
+        Qt.Key_Slash: '/',
+        Qt.Key_Backslash: '\\',
+        Qt.Key_Bar: '|',
+        Qt.Key_Ampersand: '&',
+        Qt.Key_Percent: '%',
+        Qt.Key_Dollar: '$',
+        Qt.Key_NumberSign: '#',
+        Qt.Key_At: '@',
+        Qt.Key_AsciiCircum: '^',
+        Qt.Key_QuoteLeft: '`',
+        Qt.Key_AsciiTilde: '~',
+    }
+    
     def __init__(self, config_manager, parent=None):
         super().__init__(parent)
         self.config_manager = config_manager
@@ -403,6 +441,41 @@ class ConfigWindow(QDialog):
         self._refresh_key_tags_for('page_up_keys', self.page_up_keys_layout, self.page_up_record_btn)
         self._refresh_key_tags_for('page_down_keys', self.page_down_keys_layout, self.page_down_record_btn)
 
+    def _get_key_display_name(self, key_token):
+        """
+        将键值 token 转换为显示名
+        
+        Args:
+            key_token: 键值 token（可能是 'space'、'enter'、'tab' 或字符串形式的键值数字）
+            
+        Returns:
+            友好的显示名称
+        """
+        if key_token == 'space':
+            return 'Space'
+        elif key_token == 'enter':
+            return 'Enter'
+        elif key_token == 'tab':
+            return 'Tab'
+        
+        # 尝试解析为数字键值
+        try:
+            key_value = int(key_token)
+            # 检查是否在预定义映射中
+            if key_value in self.KEY_VALUE_TO_DISPLAY_NAME:
+                return self.KEY_VALUE_TO_DISPLAY_NAME[key_value]
+            
+            # 检查是否是字母或数字（范围 0-9, A-Z）
+            if key_value >= 48 and key_value <= 57:  # 0-9
+                return chr(key_value)
+            if key_value >= 65 and key_value <= 90:  # A-Z
+                return chr(key_value).lower()
+            
+            # 其他情况直接返回键值数字
+            return f'Key({key_value})'
+        except (ValueError, TypeError):
+            return key_token
+            
     def _refresh_key_tags_for(self, config_key, layout, record_btn):
         """为指定方向刷新按键标签"""
         # 清除旧标签
@@ -435,8 +508,11 @@ class ConfigWindow(QDialog):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(4)
 
+            # 获取显示名称
+            display_name = self._get_key_display_name(key_token)
+            
             # 按键标签
-            key_label = QLabel(f'  {key_token}  ')
+            key_label = QLabel(f'  {display_name}  ')
             key_label.setStyleSheet(
                 'background-color: #e8f4fd; color: #2c3e50; border: 1px solid #b0d4f1; '
                 'border-radius: 3px; font-family: monospace; font-size: 11pt;'
@@ -451,7 +527,7 @@ class ConfigWindow(QDialog):
                 'border-radius: 10px; font-size: 12pt; font-weight: bold; }'
                 'QPushButton:hover { background-color: #c0392b; }'
             )
-            del_btn.setToolTip(f'删除按键 "{key_token}"')
+            del_btn.setToolTip(f'删除按键 "{display_name}"')
             del_btn.clicked.connect(lambda checked, k=config_key, t=key_token: self.remove_key(k, t))
             row_layout.addWidget(del_btn)
             row_layout.addStretch()
@@ -828,19 +904,21 @@ class ConfigWindow(QDialog):
                 event.accept()
                 return
 
-            # 将按键映射为可保存的token
+            # 将按键映射为可保存的token（使用Qt键值作为token，确保一致性）
             key_token = None
-            if event.key() == Qt.Key_Space:
+            key_value = event.key()
+            # 对于特殊键，用特殊名称；对于其他键，用字符串形式的键值
+            if key_value == Qt.Key_Space:
                 key_token = 'space'
-            elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            elif key_value in (Qt.Key_Return, Qt.Key_Enter):
                 key_token = 'enter'
-            elif event.key() == Qt.Key_Tab:
+            elif key_value == Qt.Key_Tab:
                 key_token = 'tab'
             else:
-                # 使用event.text()获取字符（支持字母、数字、符号）
-                text = event.text()
-                if text and len(text.strip()) == 1:
-                    key_token = text
+                # 对于字母、数字、符号键，直接用键值作为token（字符串形式存储）
+                key_token = str(key_value)
+                # 调试信息
+                print(f"[调试-配置录入] 按键: key={key_value}, text={repr(event.text())}, token={repr(key_token)}")
 
             # 过滤禁止的特殊键
             if key_token in ('ctrl', 'alt', 'shift', 'win', 'meta', 'command', 'super'):
@@ -905,13 +983,17 @@ class ConfigWindow(QDialog):
     def add_key(self, config_key, key_token):
         """添加按键"""
         keys = self.config.get(config_key, [])
+        print(f"[调试-add_key] 准备添加: config_key={config_key}, key_token={repr(key_token)}, 当前列表={keys}")
         if key_token not in keys and len(keys) < 5:
             keys.append(key_token)
             self.config[config_key] = keys
+            print(f"[调试-add_key] 添加成功! 新列表={self.config[config_key]}")
             self.config_manager.save_config(self.config)
             self.config_changed.emit()
             self.refresh_key_tags()
             return True
+        else:
+            print(f"[调试-add_key] 添加失败! 已存在或达到上限")
         return False
 
     def on_auto_read_speed_changed(self, value):

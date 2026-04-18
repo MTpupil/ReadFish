@@ -230,12 +230,12 @@ class ConfigManager:
         size = int(validated.get('dot_cursor_size', 2))
         validated['dot_cursor_size'] = max(1, min(16, size))
 
-        # 验证翻页按键（最多两个，允许字母键 a-z、数字 0-9，以及特定单键：space、enter、tab；禁止 ctrl/alt/shift/win 等全局/功能键及组合键）
+        # 验证翻页按键（最多5个，支持所有按键的键值字符串，如 '96'、'49' 等）
         def normalize_page_keys(keys):
             """规范化并限制翻页按键列表
-            - 允许：单字符字母/数字，或特定关键词：space、enter、tab
-            - 禁止：ctrl/alt/shift/win/meta/command 以及 f1-f12 等功能键（不在可选列表中）
-            - 转为小写，去重，最多保留2个
+            - 允许：键值数字字符串（如 '96'、'49'）或特殊键（space、enter、tab）
+            - 禁止：ctrl/alt/shift/win/meta/command 等
+            - 去重，最多保留5个
             """
             allowed_specials = {'space', 'enter', 'tab'}
             forbidden = {'ctrl', 'alt', 'shift', 'win', 'meta', 'command', 'super'}
@@ -252,14 +252,14 @@ class ConfigManager:
                     if kk in allowed_specials:
                         if kk not in result:
                             result.append(kk)
-                    # 单字符字母或数字
-                    elif len(kk) == 1 and (kk.isalpha() or kk.isdigit()):
+                    # 键值数字字符串（如 '96'、'49'）
+                    elif kk.isdigit():
                         if kk not in result:
                             result.append(kk)
                     # 其他值忽略
-                    if len(result) >= 2:
+                    if len(result) >= 5:
                         break
-            return result[:2]
+            return result[:5]
 
         validated['page_up_keys'] = normalize_page_keys(validated.get('page_up_keys', []))
         validated['page_down_keys'] = normalize_page_keys(validated.get('page_down_keys', []))

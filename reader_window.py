@@ -1441,6 +1441,8 @@ class ReaderWindow(QWidget):
         # 自定义翻页按键更新
         self.page_up_keys = config.get('page_up_keys', [])
         self.page_down_keys = config.get('page_down_keys', [])
+        # 调试信息
+        print(f"[调试-on_config_changed] 配置更新! 上一页按键: {self.page_up_keys}, 下一页按键: {self.page_down_keys}")
         
         # 根据新配置更新窗口可见性
         # 如果启用了显示控制功能，需要重新评估窗口状态
@@ -1851,25 +1853,32 @@ class ReaderWindow(QWidget):
         elif event.key() == Qt.Key_PageDown:
             if content_visible_now:
                 self.page_down()
-        # 自定义翻页按键：支持字母/数字/符号/特定单键（space/enter/tab），禁止组合键
+        # 自定义翻页按键：使用 Qt 键值作为 token，支持所有按键（不受输入法影响）
         else:
             # 禁止组合键：仅在无修饰键时才响应自定义翻页按键
             if event.modifiers() == Qt.NoModifier and content_visible_now:
-                # 先识别特定单键
+                # 识别按键 token（使用 Qt 键值）
                 key_token = None
-                if event.key() == Qt.Key_Space:
+                key_value = event.key()
+                
+                # 对于特殊键，用特殊名称
+                if key_value == Qt.Key_Space:
                     key_token = 'space'
-                elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                elif key_value in (Qt.Key_Return, Qt.Key_Enter):
                     key_token = 'enter'
-                elif event.key() == Qt.Key_Tab:
+                elif key_value == Qt.Key_Tab:
                     key_token = 'tab'
                 else:
-                    # 使用event.text()获取字符（支持字母、数字、符号键）
-                    t = event.text()
-                    if t and len(t.strip()) == 1:
-                        key_token = t
+                    # 对于其他键，用字符串形式的键值作为 token
+                    key_token = str(key_value)
+                
                 # 根据用户设置触发翻页
                 if key_token:
+                    # 调试：打印按键信息
+                    print(f"[调试] 按键识别: key={key_value}, text={repr(event.text())}, token={repr(key_token)}")
+                    print(f"[调试] 上一页按键列表: {self.page_up_keys}")
+                    print(f"[调试] 下一页按键列表: {self.page_down_keys}")
+                    
                     if key_token in (self.page_up_keys or []):
                         self.page_up()
                         event.accept()
