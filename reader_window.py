@@ -627,6 +627,10 @@ class ReaderWindow(QWidget):
         
         # 更新阅读历史记录
         self.update_reading_history()
+        
+        # 如果在自动阅读状态，重置计时器，避免用户刚翻完页又被自动翻回去
+        if self.auto_reading and not self.auto_read_paused:
+            self.auto_read_timer.start()
             
     def page_down(self):
         """向下翻页"""
@@ -678,6 +682,10 @@ class ReaderWindow(QWidget):
         
         # 更新阅读历史记录
         self.update_reading_history()
+        
+        # 如果在自动阅读状态，重置计时器，避免用户刚翻完页又被自动翻回去
+        if self.auto_reading and not self.auto_read_paused:
+            self.auto_read_timer.start()
         
     def update_reading_history(self):
         """更新阅读历史记录"""
@@ -1820,18 +1828,22 @@ class ReaderWindow(QWidget):
             else:
                 # 不是自动阅读状态，按原逻辑处理
                 super().keyPressEvent(event)
-        # 上键 - 翻页或加快自动阅读速度
+        # 上键 - 翻页
         elif event.key() == Qt.Key_Up:
-            if self.auto_reading:
-                self.increase_auto_read_speed()
-            elif content_visible_now:
+            if content_visible_now:
                 self.page_up()
-        # 下键 - 翻页或减慢自动阅读速度
+        # 下键 - 翻页
         elif event.key() == Qt.Key_Down:
+            if content_visible_now:
+                self.page_down()
+        # 左键 - 减慢自动阅读速度（仅在自动阅读时有效）
+        elif event.key() == Qt.Key_Left:
             if self.auto_reading:
                 self.decrease_auto_read_speed()
-            elif content_visible_now:
-                self.page_down()
+        # 右键 - 加快自动阅读速度（仅在自动阅读时有效）
+        elif event.key() == Qt.Key_Right:
+            if self.auto_reading:
+                self.increase_auto_read_speed()
         # PageUp/PageDown 支持 - 常见期望的翻页键
         elif event.key() == Qt.Key_PageUp:
             if content_visible_now:
