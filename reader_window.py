@@ -1441,8 +1441,6 @@ class ReaderWindow(QWidget):
         # 自定义翻页按键更新
         self.page_up_keys = config.get('page_up_keys', [])
         self.page_down_keys = config.get('page_down_keys', [])
-        # 调试信息
-        print(f"[调试-on_config_changed] 配置更新! 上一页按键: {self.page_up_keys}, 下一页按键: {self.page_down_keys}")
         
         # 根据新配置更新窗口可见性
         # 如果启用了显示控制功能，需要重新评估窗口状态
@@ -1874,11 +1872,6 @@ class ReaderWindow(QWidget):
                 
                 # 根据用户设置触发翻页
                 if key_token:
-                    # 调试：打印按键信息
-                    print(f"[调试] 按键识别: key={key_value}, text={repr(event.text())}, token={repr(key_token)}")
-                    print(f"[调试] 上一页按键列表: {self.page_up_keys}")
-                    print(f"[调试] 下一页按键列表: {self.page_down_keys}")
-                    
                     if key_token in (self.page_up_keys or []):
                         self.page_up()
                         event.accept()

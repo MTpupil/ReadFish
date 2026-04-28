@@ -917,8 +917,6 @@ class ConfigWindow(QDialog):
             else:
                 # 对于字母、数字、符号键，直接用键值作为token（字符串形式存储）
                 key_token = str(key_value)
-                # 调试信息
-                print(f"[调试-配置录入] 按键: key={key_value}, text={repr(event.text())}, token={repr(key_token)}")
 
             # 过滤禁止的特殊键
             if key_token in ('ctrl', 'alt', 'shift', 'win', 'meta', 'command', 'super'):
@@ -983,17 +981,13 @@ class ConfigWindow(QDialog):
     def add_key(self, config_key, key_token):
         """添加按键"""
         keys = self.config.get(config_key, [])
-        print(f"[调试-add_key] 准备添加: config_key={config_key}, key_token={repr(key_token)}, 当前列表={keys}")
         if key_token not in keys and len(keys) < 5:
             keys.append(key_token)
             self.config[config_key] = keys
-            print(f"[调试-add_key] 添加成功! 新列表={self.config[config_key]}")
             self.config_manager.save_config(self.config)
             self.config_changed.emit()
             self.refresh_key_tags()
             return True
-        else:
-            print(f"[调试-add_key] 添加失败! 已存在或达到上限")
         return False
 
     def on_auto_read_speed_changed(self, value):
