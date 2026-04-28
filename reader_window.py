@@ -6,9 +6,12 @@
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QMenu, QAction,
-    QApplication, QMessageBox, QCheckBox, QLabel
+    QApplication, QMessageBox, QCheckBox, QLabel, QGraphicsOpacityEffect
 )
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QEvent, QRect, QTimer
+from PyQt5.QtCore import (
+    Qt, QPoint, pyqtSignal, QEvent, QRect, QTimer,
+    QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
+)
 from PyQt5.QtGui import QFont, QColor, QPalette, QPainter, QPen, QCursor, QPixmap
 import ctypes
 from ctypes import wintypes
@@ -247,6 +250,12 @@ class ReaderWindow(QWidget):
         self.auto_read_timer = None  # 自动阅读定时器
         self.auto_read_was_paused_by_hide = False  # 标记是否因窗口隐藏而暂停
         self.contents_window = None  # 目录窗口引用
+        self.last_page_direction = 0  # 翻页方向：-1上一页，1下一页
+        self.animate_next_text_update = False  # 仅在翻页触发时启用单行过渡
+        self.single_line_transition_duration = 90  # 单行翻页过渡时长（毫秒）
+        self.transition_overlay = None
+        self.transition_overlay_effect = None
+        self.transition_animation = None
         
         # 初始化自动阅读定时器
         self.auto_read_timer = QTimer(self)
@@ -358,6 +367,7 @@ class ReaderWindow(QWidget):
         
         frame_layout.addWidget(self.text_edit)
         layout.addWidget(self.background_frame)
+        self.init_text_transition_overlay()
         
         # 设置默认大小和位置
         self.resize(400, 300)
@@ -560,15 +570,97 @@ class ReaderWindow(QWidget):
             # 获取当前页要显示的文本片段
             end_offset = min(self.current_char_offset + visible_chars, len(current_line))
             display_text = current_line[self.current_char_offset:end_offset]
-            
-            self.text_edit.setPlainText(display_text)
             self.text_edit.setLineWrapMode(QTextEdit.NoWrap)
+            should_transition = self.animate_next_text_update
+            self.animate_next_text_update = False
+            self.set_display_text(display_text, use_transition=should_transition)
         else:
             # 多行模式：显示完整行，避免显示不完整的行
             display_text = self.get_visible_complete_lines()
             # 启用自动换行，让长行能够在窗口内正确显示
             self.text_edit.setLineWrapMode(QTextEdit.WidgetWidth)
+            self.animate_next_text_update = False
+            self.set_display_text(display_text, use_transition=False)
+
+    def init_text_transition_overlay(self):
+        """初始化单行翻页过渡层，仅覆盖文字区域，避免整窗闪动。"""
+        self.transition_overlay = QLabel(self.text_edit.viewport())
+        self.transition_overlay.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.transition_overlay.setScaledContents(False)
+        self.transition_overlay.hide()
+
+        self.transition_overlay_effect = QGraphicsOpacityEffect(self.transition_overlay)
+        self.transition_overlay_effect.setOpacity(0.0)
+        self.transition_overlay.setGraphicsEffect(self.transition_overlay_effect)
+
+    def stop_text_transition(self):
+        """停止当前文字过渡动画，避免快速翻页时动画叠加。"""
+        if self.transition_animation:
+            self.transition_animation.stop()
+            self.transition_animation = None
+
+        if self.transition_overlay:
+            self.transition_overlay.hide()
+            self.transition_overlay.move(0, 0)
+
+        if self.transition_overlay_effect:
+            self.transition_overlay_effect.setOpacity(0.0)
+
+    def set_display_text(self, display_text, use_transition=False):
+        """设置阅读区文本，在单行翻页时使用轻量过渡降低闪烁感。"""
+        current_text = self.text_edit.toPlainText()
+        if current_text == display_text:
+            return
+
+        should_transition = (
+            use_transition and
+            bool(current_text) and
+            self.isVisible() and
+            getattr(self, 'content_visible', True) and
+            self.transition_overlay is not None and
+            self.transition_overlay_effect is not None
+        )
+
+        if not should_transition:
+            self.stop_text_transition()
             self.text_edit.setPlainText(display_text)
+            return
+
+        self.stop_text_transition()
+
+        old_snapshot = self.text_edit.viewport().grab()
+        if old_snapshot.isNull():
+            self.text_edit.setPlainText(display_text)
+            return
+
+        self.transition_overlay.setPixmap(old_snapshot)
+        self.transition_overlay.setGeometry(self.text_edit.viewport().rect())
+        self.transition_overlay.move(0, 0)
+        self.transition_overlay_effect.setOpacity(1.0)
+        self.transition_overlay.show()
+        self.transition_overlay.raise_()
+
+        self.text_edit.setPlainText(display_text)
+
+        direction_offset = -6 if self.last_page_direction > 0 else 6 if self.last_page_direction < 0 else 0
+
+        fade_animation = QPropertyAnimation(self.transition_overlay_effect, b'opacity', self)
+        fade_animation.setDuration(self.single_line_transition_duration)
+        fade_animation.setStartValue(1.0)
+        fade_animation.setEndValue(0.0)
+        fade_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+        move_animation = QPropertyAnimation(self.transition_overlay, b'pos', self)
+        move_animation.setDuration(self.single_line_transition_duration)
+        move_animation.setStartValue(QPoint(0, 0))
+        move_animation.setEndValue(QPoint(0, direction_offset))
+        move_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+        self.transition_animation = QParallelAnimationGroup(self)
+        self.transition_animation.addAnimation(fade_animation)
+        self.transition_animation.addAnimation(move_animation)
+        self.transition_animation.finished.connect(self.stop_text_transition)
+        self.transition_animation.start()
         
     def page_up(self):
         """向上翻页"""
@@ -580,6 +672,8 @@ class ReaderWindow(QWidget):
             # 单行模式：支持长行分页
             if not hasattr(self, 'current_char_offset'):
                 self.current_char_offset = 0
+            self.last_page_direction = -1
+            self.animate_next_text_update = True
                 
             current_line = self.text_lines[self.current_line_index]
             visible_chars = self.calculate_visible_chars(current_line)
@@ -642,6 +736,8 @@ class ReaderWindow(QWidget):
             # 单行模式：支持长行分页
             if not hasattr(self, 'current_char_offset'):
                 self.current_char_offset = 0
+            self.last_page_direction = 1
+            self.animate_next_text_update = True
                 
             current_line = self.text_lines[self.current_line_index]
             visible_chars = self.calculate_visible_chars(current_line)
