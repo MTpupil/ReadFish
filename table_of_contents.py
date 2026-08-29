@@ -15,7 +15,9 @@ logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s -
 class TableOfContents:
     """目录解析器类 - 性能优化版"""
     
-    def __init__(self):
+    NUMBER_PATTERN = r'[\d一二三四五六七八九十百千万零壹贰叁肆伍陆柒捌玖拾佰仟萬]+'
+
+    def __init__(self, custom_pattern: str = '', custom_mode: str = 'simple'):
         # 快速检查：先检查是否包含常见的章节关键词，避免不必要的正则匹配
         self.fast_check_keywords = [
             '第', '章', '回', '节', '篇', '卷', '部', '集',
@@ -24,7 +26,7 @@ class TableOfContents:
         ]
         
         # 核心正则表达式（精简版，只保留最常用的模式）
-        number_pattern = r'[\d一二三四五六七八九十百千万零壹贰叁肆伍陆柒捌玖拾佰仟萬]+'
+        number_pattern = self.NUMBER_PATTERN
         chapter_unit_pattern = r'[章回节篇卷部集]'
         
         # 只保留最核心、最常用的章节模式（按优先级排序）
@@ -39,8 +41,34 @@ class TableOfContents:
             r'^\s*(序章|楔子|尾声|后记|番外|终章)[：:：\s].*$',
         ]
         
+        self.has_custom_pattern = bool(custom_pattern and custom_pattern.strip())
+
         # 编译正则表达式
         self.compiled_patterns = [re.compile(pattern) for pattern in self.chapter_patterns]
+        if self.has_custom_pattern:
+            try:
+                self.compiled_patterns.insert(0, self.compile_custom_pattern(custom_pattern, custom_mode))
+            except re.error:
+                # 配置文件被手工修改为无效规则时，仍可使用默认规则阅读。
+                self.has_custom_pattern = False
+
+    @classmethod
+    def compile_custom_pattern(cls, pattern: str, mode: str):
+        """将用户输入的章节格式编译为行级匹配正则。"""
+        pattern = (pattern or '').strip()
+        if not pattern:
+            raise re.error('章节格式不能为空')
+
+        if mode == 'regex':
+            return re.compile(pattern)
+
+        escaped = re.escape(pattern)
+        escaped = escaped.replace(r'\ \{title\}', r'(?:\s+.*)?')
+        escaped = escaped.replace(r'\{number\}', cls.NUMBER_PATTERN)
+        escaped = escaped.replace(r'\{title\}', r'.*')
+        escaped = escaped.replace(r'\{space\}', r'\s+')
+        escaped = escaped.replace(r'\ ', r'\s+')
+        return re.compile(r'^' + escaped + r'$')
         
     def parse_contents(self, text: str, min_chapter_length: int = 3, max_chapters: int = 10000) -> List[Dict]:
         """
@@ -62,13 +90,13 @@ class TableOfContents:
         """
         logging.info(f"开始解析目录，文本长度: {len(text)} 字符")
         
-        # 快速检查：如果文本不包含任何章节关键词，直接返回空列表
+        # 自定义规则可能不包含默认章节关键词，不能跳过。
         has_chapters = False
         for keyword in self.fast_check_keywords:
             if keyword in text:
                 has_chapters = True
                 break
-        if not has_chapters:
+        if not has_chapters and not self.has_custom_pattern:
             logging.info("文本中未发现章节关键词，跳过解析")
             return []
         
@@ -98,7 +126,7 @@ class TableOfContents:
                 if keyword in line_stripped:
                     has_keyword = True
                     break
-            if not has_keyword:
+            if not has_keyword and not self.has_custom_pattern:
                 char_position += len(line) + 1
                 continue
             

@@ -5,10 +5,11 @@
 """
 
 import os
+import re
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QListWidget, QListWidgetItem, QMessageBox, QProgressBar,
-    QSplitter, QTextEdit, QFrame
+    QSplitter, QTextEdit, QFrame, QRadioButton, QLineEdit, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt5.QtGui import QFont, QIcon
@@ -25,10 +26,13 @@ class ContentsParseThread(QThread):
     parse_progress = pyqtSignal(int)   # 解析进度信号
     parse_error = pyqtSignal(str)      # 解析错误信号
     
-    def __init__(self, file_path):
+    def __init__(self, file_path, chapter_format=None):
         super().__init__()
         self.file_path = file_path
-        self.toc_parser = TableOfContents()
+        chapter_format = chapter_format or {}
+        self.toc_parser = TableOfContents(
+            chapter_format.get('pattern', ''), chapter_format.get('mode', 'simple')
+        )
         
     def run(self):
         """运行解析任务"""
@@ -67,6 +71,7 @@ class ContentsWindow(QDialog):
     
     # 定义信号
     chapter_selected = pyqtSignal(dict)  # 章节选择信号
+    chapter_format_changed = pyqtSignal()
     
     def __init__(self, book_info, *args, **kwargs):
         # 兼容两种调用方式：
@@ -74,6 +79,7 @@ class ContentsWindow(QDialog):
         # 方式2: ContentsWindow(book_info, parent)
         parent = kwargs.get('parent', None)
         current_line_number = kwargs.get('current_line_number', None)
+        self.config_manager = kwargs.get('config_manager')
         
         if len(args) > 0:
             arg = args[0]
@@ -338,6 +344,11 @@ class ContentsWindow(QDialog):
             "}"
         )
         self.reparse_btn.clicked.connect(self.start_parsing)
+
+        self.format_btn = QPushButton("章节格式")
+        self.format_btn.setFixedHeight(35)
+        self.format_btn.setToolTip('为当前书籍设置自定义章节识别格式')
+        self.format_btn.clicked.connect(self.show_chapter_format_dialog)
         
         # 跳转到章节按钮
         self.goto_btn = QPushButton("跳转到此章节")
@@ -387,6 +398,7 @@ class ContentsWindow(QDialog):
         close_btn.clicked.connect(self.close)
         
         button_layout.addWidget(self.reparse_btn)
+        button_layout.addWidget(self.format_btn)
         button_layout.addStretch()
         button_layout.addWidget(self.goto_btn)
         button_layout.addWidget(close_btn)
@@ -410,13 +422,64 @@ class ContentsWindow(QDialog):
         self.status_label.setText("正在解析目录...")
         self.status_label.setVisible(True)
         self.reparse_btn.setEnabled(False)
+        self.format_btn.setEnabled(False)
         
         # 启动解析线程
-        self.parse_thread = ContentsParseThread(file_path)
+        chapter_format = self.config_manager.get_chapter_format(file_path) if self.config_manager else {}
+        self.parse_thread = ContentsParseThread(file_path, chapter_format)
         self.parse_thread.parse_finished.connect(self.on_parse_finished)
         self.parse_thread.parse_progress.connect(self.on_parse_progress)
         self.parse_thread.parse_error.connect(self.on_parse_error)
         self.parse_thread.start()
+
+    def show_chapter_format_dialog(self):
+        """编辑当前书籍的章节识别格式。"""
+        if not self.config_manager:
+            QMessageBox.warning(self, '错误', '无法保存章节格式配置')
+            return
+
+        file_path = self.book_info.get('file_path', '')
+        current = self.config_manager.get_chapter_format(file_path)
+        dialog = QDialog(self)
+        dialog.setWindowTitle('章节格式')
+        dialog.setMinimumWidth(520)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel('简便格式可使用 {number}、{title}、{space}；普通空格会匹配一个或多个空白。'))
+
+        simple_radio = QRadioButton('简便格式')
+        regex_radio = QRadioButton('正则表达式')
+        mode = current.get('mode', 'simple')
+        (regex_radio if mode == 'regex' else simple_radio).setChecked(True)
+        layout.addWidget(simple_radio)
+        layout.addWidget(regex_radio)
+
+        pattern_input = QLineEdit(current.get('pattern', ''))
+        pattern_input.setPlaceholderText('# 第{number}章 {title}')
+        layout.addWidget(pattern_input)
+        layout.addWidget(QLabel('示例：# 第{number}章 {title}'))
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        buttons.rejected.connect(dialog.reject)
+
+        def save_format():
+            selected_mode = 'regex' if regex_radio.isChecked() else 'simple'
+            pattern = pattern_input.text()
+            if pattern.strip():
+                try:
+                    TableOfContents.compile_custom_pattern(pattern, selected_mode)
+                except re.error as error:
+                    QMessageBox.warning(dialog, '格式无效', f'章节格式无法使用：{error}')
+                    return
+            if not self.config_manager.set_chapter_format(file_path, selected_mode, pattern):
+                QMessageBox.warning(dialog, '保存失败', '章节格式未能保存')
+                return
+            dialog.accept()
+            self.chapter_format_changed.emit()
+            self.start_parsing()
+
+        buttons.accepted.connect(save_format)
+        dialog.exec_()
         
     @pyqtSlot(list)
     def on_parse_finished(self, chapters):
@@ -424,6 +487,7 @@ class ContentsWindow(QDialog):
         self.chapters = chapters
         self.progress_bar.setVisible(False)
         self.reparse_btn.setEnabled(True)
+        self.format_btn.setEnabled(True)
         
         if not chapters:
             self.status_label.setText("未找到章节目录")
@@ -489,6 +553,7 @@ class ContentsWindow(QDialog):
         """解析错误处理"""
         self.progress_bar.setVisible(False)
         self.reparse_btn.setEnabled(True)
+        self.format_btn.setEnabled(True)
         self.status_label.setText(f"解析失败：{error_msg}")
         QMessageBox.critical(self, '解析错误', f'目录解析失败：{error_msg}')
         

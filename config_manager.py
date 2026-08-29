@@ -70,7 +70,10 @@ class ConfigManager:
             'auto_read_speed_step': 0.5,     # 速度调整步长
             
             # 阅读显示设置
-            'remove_empty_lines': False        # 是否去除完全空行
+            'remove_empty_lines': False,       # 是否去除完全空行
+
+            # 按书籍保存的章节识别格式
+            'chapter_formats': {}
         }
         
         # 当前配置
@@ -169,6 +172,29 @@ class ConfigManager:
         except Exception as e:
             # 更新配置失败
             return False
+
+    @staticmethod
+    def _chapter_format_key(file_path: str) -> str:
+        return os.path.normcase(os.path.abspath(file_path))
+
+    def get_chapter_format(self, file_path: str) -> Dict[str, str]:
+        formats = self.current_config.get('chapter_formats', {})
+        if not isinstance(formats, dict):
+            return {}
+        value = formats.get(self._chapter_format_key(file_path), {})
+        return value.copy() if isinstance(value, dict) else {}
+
+    def set_chapter_format(self, file_path: str, mode: str, pattern: str) -> bool:
+        config = self.get_config()
+        formats = config.get('chapter_formats', {})
+        formats = formats.copy() if isinstance(formats, dict) else {}
+        key = self._chapter_format_key(file_path)
+        if pattern.strip():
+            formats[key] = {'mode': mode, 'pattern': pattern.strip()}
+        else:
+            formats.pop(key, None)
+        config['chapter_formats'] = formats
+        return self.save_config(config)
             
     def validate_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """验证和修正配置值

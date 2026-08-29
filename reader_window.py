@@ -1581,7 +1581,10 @@ class ReaderWindow(QWidget):
                 from table_of_contents import TableOfContents
                 
                 # 创建目录解析器实例
-                toc_parser = TableOfContents()
+                chapter_format = self.config_manager.get_chapter_format(self.file_path) if self.file_path else {}
+                toc_parser = TableOfContents(
+                    chapter_format.get('pattern', ''), chapter_format.get('mode', 'simple')
+                )
                 
                 # 解析当前文本的章节
                 chapters = toc_parser.parse_contents(self.full_text)
@@ -2428,9 +2431,13 @@ class ReaderWindow(QWidget):
                 self.contents_window = ContentsWindow(
                     book_info, 
                     current_line_number=current_line_number,
-                    parent=self
+                    parent=self,
+                    config_manager=self.config_manager
                 )
                 self.contents_window.chapter_selected.connect(self.goto_chapter_from_contents)
+                self.contents_window.chapter_format_changed.connect(
+                    lambda: setattr(self, '_cached_chapters', None)
+                )
                 self.contents_window.finished.connect(lambda: setattr(self, 'contents_window', None))
             else:
                 # 窗口已存在，更新当前行号

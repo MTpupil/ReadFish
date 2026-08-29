@@ -1948,7 +1948,10 @@ class MainWindow(_BaseMainWindow):
                 current_line_number = current_line_index + 1  # 转换为1基
         
         # 创建目录窗口
-        contents_window = ContentsWindow(book_info, current_line_number=current_line_number, parent=self)
+        contents_window = ContentsWindow(
+            book_info, current_line_number=current_line_number, parent=self,
+            config_manager=self.config_manager
+        )
         
         # 连接章节选择信号，使用 lambda 传递书籍信息
         contents_window.chapter_selected.connect(
